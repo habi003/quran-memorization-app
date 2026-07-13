@@ -211,17 +211,20 @@ export function ParentDashboard() {
   return (
     <div className="animate-fade-in-up mx-auto flex min-h-screen max-w-2xl flex-col gap-6 bg-gradient-to-b from-slate-50 to-white px-4 py-10">
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-800">Welcome, {getDisplayName(user)}</h1>
-          <p className="flex items-center gap-1.5 text-sm text-slate-500">
-            Here's how the family is doing.
-            {isLive && (
-              <span className="flex items-center gap-1 text-xs font-medium text-emerald-600">
-                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
-                Live
-              </span>
-            )}
-          </p>
+        <div className="flex items-center gap-3">
+          <img src="/favicon.svg" alt="" className="h-9 w-9 rounded-lg shadow-sm shadow-emerald-900/10" />
+          <div>
+            <h1 className="text-2xl font-bold text-slate-800">Assalamu Alaikum, {getDisplayName(user)}</h1>
+            <p className="flex items-center gap-1.5 text-sm text-slate-500">
+              Here's how the family is doing.
+              {isLive && (
+                <span className="flex items-center gap-1 text-xs font-medium text-emerald-600">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
+                  Live
+                </span>
+              )}
+            </p>
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <ModeToggle mode="parent" onSwitch={switchToKidMode} />
