@@ -53,8 +53,17 @@ export function KidPicker() {
   if (kids === null) return <LoadingScreen />
 
   return (
-    <div className="flex min-h-screen flex-col items-center gap-8 bg-slate-50 px-4 py-12">
-      <h1 className="animate-fade-in-up text-3xl font-bold text-slate-800">Who's practicing today?</h1>
+    <div className="flex min-h-screen flex-col items-center gap-8 bg-gradient-to-b from-emerald-50 via-white to-white px-4 py-12">
+      <div className="animate-fade-in-up flex flex-col items-center gap-4">
+        <div className="flex flex-col items-center gap-1">
+          <img src="/favicon.svg" alt="" className="h-10 w-10 rounded-xl shadow-md shadow-emerald-900/10" />
+          <p className="text-xs font-semibold tracking-wide text-emerald-700/70 uppercase">Little Hafiz</p>
+        </div>
+        <div className="text-center">
+          <h1 className="text-3xl font-bold text-slate-800">Assalamu Alaikum!</h1>
+          <p className="mt-1 text-lg text-slate-500">Who's practicing today?</p>
+        </div>
+      </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
