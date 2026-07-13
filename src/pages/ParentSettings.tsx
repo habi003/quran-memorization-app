@@ -5,6 +5,8 @@ import { clearPin, hasPin, setPin } from '../lib/pin'
 import { useDeviceMode } from '../context/DeviceModeContext'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
+import { fetchReciters } from '../lib/quran'
+import { getDisplayName, hasCustomName } from '../lib/displayName'
 import type { Kid } from '../types/database'
 import { AVATAR_ICONS } from '../lib/avatarIcons'
 import { getTheme } from '../lib/themes'
@@ -12,20 +14,23 @@ import { PinPad } from '../components/PinPad'
 import { KidForm } from '../components/KidForm'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { BackButton } from '../components/BackButton'
-import { playSuccess, playTap } from '../lib/sounds'
+import { playSuccess, playError, playTap } from '../lib/sounds'
 
 export function ParentSettings() {
   const navigate = useNavigate()
   const { clearDeviceType } = useDeviceMode()
-  const { signOut } = useAuth()
+  const { user, signOut } = useAuth()
   const [pinSet, setPinSet] = useState(hasPin())
   const [message, setMessage] = useState<string | null>(null)
+  const [name, setName] = useState(hasCustomName(user) ? getDisplayName(user) : '')
+  const [nameSaving, setNameSaving] = useState(false)
 
   const [kids, setKids] = useState<Kid[] | null>(null)
   const [kidsError, setKidsError] = useState<string | null>(null)
   const [editingKid, setEditingKid] = useState<Kid | null>(null)
   const [deletingKid, setDeletingKid] = useState<Kid | null>(null)
   const [addingKid, setAddingKid] = useState(false)
+  const [reciterNames, setReciterNames] = useState<Record<string, string>>({})
 
   const loadKids = useCallback(async () => {
     const { data, error: fetchError } = await supabase.from('kids').select('*').order('created_at')
@@ -36,6 +41,16 @@ export function ParentSettings() {
   useEffect(() => {
     loadKids()
   }, [loadKids])
+
+  useEffect(() => {
+    fetchReciters()
+      .then((list) => {
+        setReciterNames(Object.fromEntries(list.map((r) => [r.identifier, r.englishName])))
+      })
+      .catch(() => {
+        // Reciter names are a display nicety — fine to just show nothing.
+      })
+  }, [])
 
   async function handleSetPin(pin: string) {
     await setPin(pin)
@@ -49,6 +64,20 @@ export function ParentSettings() {
     setPinSet(false)
     setMessage('PIN removed — Parent Mode is now unprotected.')
     playTap()
+  }
+
+  async function handleSaveName() {
+    if (!name.trim()) return
+    setNameSaving(true)
+    const { error: updateError } = await supabase.auth.updateUser({ data: { full_name: name.trim() } })
+    setNameSaving(false)
+    if (updateError) {
+      playError()
+      setMessage(updateError.message)
+      return
+    }
+    playSuccess()
+    setMessage('Name saved.')
   }
 
   function handleChangeDeviceType() {
@@ -79,6 +108,28 @@ export function ParentSettings() {
         <h1 className="text-2xl font-bold text-slate-800">Parent Settings</h1>
         <BackButton onClick={() => navigate('/parent')} />
       </div>
+
+      <section className="flex flex-col gap-3 rounded-2xl bg-white p-5 shadow-sm">
+        <h2 className="text-lg font-semibold text-slate-700">Your name</h2>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={getDisplayName(user)}
+            className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+          />
+          <button
+            type="button"
+            onClick={handleSaveName}
+            disabled={nameSaving || !name.trim()}
+            className="rounded-lg bg-gradient-to-br from-emerald-500 to-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:from-emerald-600 hover:to-emerald-700 disabled:opacity-50"
+          >
+            {nameSaving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+        {message && <p className="text-sm text-emerald-600">{message}</p>}
+      </section>
 
       <section className="flex flex-col gap-4 rounded-2xl bg-white p-5 shadow-sm">
         <div className="flex items-center justify-between">
@@ -119,7 +170,12 @@ export function ParentSettings() {
                     >
                       {Icon ? <Icon className="h-5 w-5" /> : kid.name[0]?.toUpperCase()}
                     </div>
-                    <span className="font-medium text-slate-800">{kid.name}</span>
+                    <div>
+                      <p className="font-medium text-slate-800">{kid.name}</p>
+                      {reciterNames[kid.preferred_reciter] && (
+                        <p className="text-xs text-slate-400">{reciterNames[kid.preferred_reciter]}</p>
+                      )}
+                    </div>
                   </div>
                   <div className="flex gap-1">
                     <button

@@ -1,21 +1,114 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import { Settings2, RotateCcw, BookOpen } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import type { Kid } from '../types/database'
+import type { Assignment, ApiSurahMeta, Ayah, Kid, SurahContent, TargetPeriod } from '../types/database'
 import { AVATAR_ICONS } from '../lib/avatarIcons'
 import { getTheme } from '../lib/themes'
+import { fetchSurah, fetchSurahList } from '../lib/quran'
+import {
+  getActiveAssignment,
+  computeTodaysSet,
+  markAyahMemorized,
+  logPracticeSessionComplete,
+  markAssignmentMastered,
+  getSurahsForReview,
+} from '../lib/memorization'
 import { AvatarPicker } from '../components/AvatarPicker'
 import { ThemePicker } from '../components/ThemePicker'
+import { FontSizePicker } from '../components/FontSizePicker'
+import { AnimationToggle } from '../components/AnimationToggle'
+import { getTextSizeScale } from '../lib/textSize'
 import { LoadingScreen } from '../components/LoadingScreen'
 import { BackButton } from '../components/BackButton'
+import { MemorizationFlow } from '../components/quran/MemorizationFlow'
+import { ProgressDots } from '../components/quran/ProgressDots'
+import { SurahReview } from '../components/quran/SurahReview'
 import { playTap, playSuccess } from '../lib/sounds'
+
+type PracticeView =
+  | { kind: 'loading' }
+  | { kind: 'no-assignment' }
+  | { kind: 'surah-complete'; surahName: string }
+  | {
+      kind: 'done-for-period'
+      period: TargetPeriod
+      surahNumber: number
+      surahName: string
+      doneInPeriod: number
+      target: number
+    }
+  | { kind: 'session'; surahName: string; ayahs: Ayah[]; index: number; period: TargetPeriod; doneInPeriod: number; target: number }
+  | { kind: 'error'; message: string }
 
 export function KidHome() {
   const { kidId } = useParams()
   const navigate = useNavigate()
   const [kid, setKid] = useState<Kid | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [assignment, setAssignment] = useState<Assignment | null>(null)
+  const [view, setView] = useState<PracticeView>({ kind: 'loading' })
   const [saved, setSaved] = useState(false)
+  const [customizing, setCustomizing] = useState(false)
+  const [reviewSurahs, setReviewSurahs] = useState<ApiSurahMeta[]>([])
+  const [reviewingSurah, setReviewingSurah] = useState<{ number: number; name: string } | null>(null)
+
+  const loadPractice = useCallback(async (currentKid: Kid) => {
+    setView({ kind: 'loading' })
+    try {
+      const active = await getActiveAssignment(currentKid.id)
+      setAssignment(active)
+      if (!active) {
+        setView({ kind: 'no-assignment' })
+        return
+      }
+
+      const surah: SurahContent = await fetchSurah(active.surah_number, currentKid.preferred_reciter)
+      const today = await computeTodaysSet(
+        currentKid.id,
+        active.surah_number,
+        surah,
+        active.daily_ayah_target,
+        active.target_period,
+      )
+
+      if (today.kind === 'surah-complete') {
+        setView({ kind: 'surah-complete', surahName: surah.englishName })
+      } else if (today.kind === 'done-for-period') {
+        setView({
+          kind: 'done-for-period',
+          period: today.period,
+          surahNumber: active.surah_number,
+          surahName: surah.englishName,
+          doneInPeriod: today.doneInPeriod,
+          target: today.target,
+        })
+      } else {
+        setView({
+          kind: 'session',
+          surahName: surah.englishName,
+          ayahs: today.ayahs,
+          index: 0,
+          period: today.period,
+          doneInPeriod: today.doneInPeriod,
+          target: today.target,
+        })
+      }
+    } catch (err) {
+      setView({ kind: 'error', message: (err as Error).message })
+    }
+  }, [])
+
+  const loadReviewSurahs = useCallback(async (currentKidId: string) => {
+    try {
+      const [numbers, allSurahs] = await Promise.all([getSurahsForReview(currentKidId, 3), fetchSurahList()])
+      const byNumber = new Map(allSurahs.map((s) => [s.number, s]))
+      setReviewSurahs(numbers.map((n) => byNumber.get(n)).filter((s): s is ApiSurahMeta => Boolean(s)))
+    } catch {
+      // Review surahs are bonus content — a failure here shouldn't block the
+      // main practice screen, just silently show none.
+      setReviewSurahs([])
+    }
+  }, [])
 
   useEffect(() => {
     if (!kidId) return
@@ -28,14 +121,76 @@ export function KidHome() {
       .single()
       .then(({ data, error: fetchError }) => {
         if (cancelled) return
-        if (fetchError) setError(fetchError.message)
-        else setKid(data as Kid)
+        if (fetchError) {
+          setView({ kind: 'error', message: fetchError.message })
+          return
+        }
+        const k = data as Kid
+        setKid(k)
+        loadPractice(k)
+        loadReviewSurahs(k.id)
       })
 
     return () => {
       cancelled = true
     }
-  }, [kidId])
+  }, [kidId, loadPractice, loadReviewSurahs])
+
+  async function handleGotIt() {
+    if (view.kind !== 'session' || !kid || !assignment) return
+    const ayah = view.ayahs[view.index]
+
+    try {
+      await markAyahMemorized(kid.id, assignment.surah_number, ayah.numberInSurah)
+    } catch (err) {
+      setView({ kind: 'error', message: (err as Error).message })
+      return
+    }
+
+    // practice_log is written on every completed ayah (not just the last of
+    // the chunk) so a partial weekly session still counts as "practiced
+    // today" for streaks.
+    try {
+      await logPracticeSessionComplete(kid.id)
+    } catch (err) {
+      setView({ kind: 'error', message: (err as Error).message })
+      return
+    }
+
+    if (view.index + 1 < view.ayahs.length) {
+      setView({ ...view, index: view.index + 1, doneInPeriod: view.doneInPeriod + 1 })
+      return
+    }
+
+    // Last ayah of this period's chunk — re-derive the next state
+    // (surah-complete vs done-for-period) fresh rather than tracking totals
+    // incrementally client-side.
+    try {
+      const surah = await fetchSurah(assignment.surah_number, kid.preferred_reciter)
+      const next = await computeTodaysSet(
+        kid.id,
+        assignment.surah_number,
+        surah,
+        assignment.daily_ayah_target,
+        assignment.target_period,
+      )
+      if (next.kind === 'surah-complete') {
+        await markAssignmentMastered(assignment.id)
+        setView({ kind: 'surah-complete', surahName: surah.englishName })
+      } else {
+        setView({
+          kind: 'done-for-period',
+          period: assignment.target_period,
+          surahNumber: assignment.surah_number,
+          surahName: surah.englishName,
+          doneInPeriod: view.doneInPeriod + 1,
+          target: view.target,
+        })
+      }
+    } catch (err) {
+      setView({ kind: 'error', message: (err as Error).message })
+    }
+  }
 
   function flashSaved() {
     playSuccess()
@@ -46,10 +201,7 @@ export function KidHome() {
   async function changeAvatar(key: string) {
     if (!kidId) return
     const { error: updateError } = await supabase.from('kids').update({ avatar: key }).eq('id', kidId)
-    if (updateError) {
-      setError(updateError.message)
-      return
-    }
+    if (updateError) return
     setKid((k) => (k ? { ...k, avatar: key } : k))
     flashSaved()
   }
@@ -57,11 +209,24 @@ export function KidHome() {
   async function changeTheme(id: string) {
     if (!kidId) return
     const { error: updateError } = await supabase.from('kids').update({ theme: id }).eq('id', kidId)
-    if (updateError) {
-      setError(updateError.message)
-      return
-    }
+    if (updateError) return
     setKid((k) => (k ? { ...k, theme: id } : k))
+    flashSaved()
+  }
+
+  async function changeTextSize(size: Kid['text_size']) {
+    if (!kidId) return
+    const { error: updateError } = await supabase.from('kids').update({ text_size: size }).eq('id', kidId)
+    if (updateError) return
+    setKid((k) => (k ? { ...k, text_size: size } : k))
+    flashSaved()
+  }
+
+  async function changeAnimationsEnabled(enabled: boolean) {
+    if (!kidId) return
+    const { error: updateError } = await supabase.from('kids').update({ animations_enabled: enabled }).eq('id', kidId)
+    if (updateError) return
+    setKid((k) => (k ? { ...k, animations_enabled: enabled } : k))
     flashSaved()
   }
 
@@ -69,48 +234,170 @@ export function KidHome() {
 
   const Icon = kid.avatar ? AVATAR_ICONS[kid.avatar] : undefined
   const theme = getTheme(kid.theme)
+  const textSize = getTextSizeScale(kid.text_size)
 
   return (
     <div
-      className={`animate-fade-in-up flex min-h-screen flex-col items-center justify-center gap-6 px-4 py-12 text-center transition-colors duration-500 ${theme.pageBg}`}
+      className={`animate-fade-in-up relative flex min-h-screen flex-col items-center gap-6 px-4 py-10 text-center transition-colors duration-500 ${theme.pageBg}`}
     >
-      <div
-        className={`flex h-24 w-24 animate-pop items-center justify-center rounded-full text-white ${theme.accentBg}`}
+      <div className="absolute left-4 top-4">
+        <BackButton onClick={() => navigate(-1)} className={theme.bodyText} />
+      </div>
+      <button
+        type="button"
+        onClick={() => {
+          playTap()
+          setCustomizing((c) => !c)
+        }}
+        aria-label="Customize"
+        className={`absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full transition hover:bg-black/5 active:scale-90 ${theme.bodyText}`}
       >
-        {Icon ? <Icon className="h-12 w-12" /> : kid.name[0]?.toUpperCase()}
+        <Settings2 className="h-5 w-5" />
+      </button>
+
+      <div className="mt-10 flex flex-col items-center gap-2">
+        <div
+          className={`flex h-20 w-20 animate-pop items-center justify-center rounded-full text-white ${theme.accentBg}`}
+        >
+          {Icon ? <Icon className="h-10 w-10" /> : kid.name[0]?.toUpperCase()}
+        </div>
+        <h1 className={`text-xl font-bold ${theme.heading}`}>{kid.name}</h1>
       </div>
 
-      <h1 className={`text-2xl font-bold ${theme.heading}`}>
-        Today's practice is coming soon, {kid.name}!
-      </h1>
+      {view.kind === 'loading' && <LoadingScreen />}
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {view.kind === 'error' && <p className="text-sm text-red-600">{view.message}</p>}
 
-      <div className={`flex w-full max-w-xs flex-col items-center gap-3 rounded-2xl p-5 shadow-sm ${theme.cardBg}`}>
-        <h2 className={`text-sm font-semibold ${theme.bodyText}`}>Pick your avatar</h2>
-        <AvatarPicker
-          value={kid.avatar}
-          onChange={(key) => {
-            playTap()
-            changeAvatar(key)
-          }}
+      {view.kind === 'no-assignment' && (
+        <p className={theme.bodyText}>No surah assigned yet — ask a parent to pick one in Parent Mode!</p>
+      )}
+
+      {view.kind === 'surah-complete' && (
+        <div className="flex flex-col items-center gap-2">
+          <p className="text-3xl">🎉</p>
+          <p className={`text-lg font-semibold ${theme.heading}`}>Surah {view.surahName} complete!</p>
+          <p className={theme.bodyText}>Ask a parent for a new surah.</p>
+        </div>
+      )}
+
+      {view.kind === 'done-for-period' && (
+        <div className="flex flex-col items-center gap-3">
+          <ProgressDots total={view.target} filled={view.doneInPeriod} />
+          <p className={`text-lg font-semibold ${theme.heading}`}>
+            {view.period === 'weekly' ? "This week's ayahs are done! 🌟" : 'Done for today! 🌟'}
+          </p>
+          <p className={theme.bodyText}>
+            {view.period === 'weekly' ? 'New ayahs next week — or revise what you know now:' : 'New ayahs tomorrow — or revise what you know now:'}
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              playTap()
+              setReviewingSurah({ number: view.surahNumber, name: view.surahName })
+            }}
+            className="flex items-center gap-1.5 rounded-full bg-gradient-to-br from-emerald-500 to-emerald-600 px-5 py-2.5 font-semibold text-white transition hover:from-emerald-600 hover:to-emerald-700 active:scale-95"
+          >
+            <RotateCcw className="h-4 w-4" /> Revise {view.surahName} from the start
+          </button>
+        </div>
+      )}
+
+      {view.kind === 'session' && (
+        <div className="flex flex-col items-center gap-6">
+          <div className="flex flex-col items-center gap-1">
+            <p className={`text-sm font-medium ${theme.bodyText}`}>
+              {view.surahName} {view.period === 'weekly' && '· this week'}
+            </p>
+            <ProgressDots total={view.target} filled={view.doneInPeriod} />
+          </div>
+          <MemorizationFlow
+            key={view.ayahs[view.index].number}
+            ayah={view.ayahs[view.index]}
+            onGotIt={handleGotIt}
+            textSize={textSize}
+          />
+        </div>
+      )}
+
+      {reviewSurahs.length > 0 && view.kind !== 'session' && view.kind !== 'loading' && (
+        <div className="flex w-full max-w-xs flex-col gap-2">
+          <h2 className={`text-sm font-semibold ${theme.bodyText}`}>Time to revise!</h2>
+          {reviewSurahs.map((s) => (
+            <button
+              key={s.number}
+              type="button"
+              onClick={() => {
+                playTap()
+                setReviewingSurah({ number: s.number, name: s.englishName })
+              }}
+              className={`flex items-center gap-2 rounded-xl p-3 text-left shadow-sm transition active:scale-95 ${theme.cardBg}`}
+            >
+              <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white ${theme.accentBg}`}>
+                <BookOpen className="h-4 w-4" />
+              </span>
+              <span className={`text-sm font-medium ${theme.heading}`}>{s.englishName}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {reviewingSurah && kid && (
+        <SurahReview
+          kidId={kid.id}
+          reciterEdition={kid.preferred_reciter}
+          surahNumber={reviewingSurah.number}
+          surahName={reviewingSurah.name}
+          textSize={textSize}
+          animationsEnabled={kid.animations_enabled}
+          onClose={() => setReviewingSurah(null)}
         />
-      </div>
+      )}
 
-      <div className={`flex w-full max-w-xs flex-col items-center gap-3 rounded-2xl p-5 shadow-sm ${theme.cardBg}`}>
-        <h2 className={`text-sm font-semibold ${theme.bodyText}`}>Pick your theme</h2>
-        <ThemePicker
-          value={kid.theme}
-          onChange={(id) => {
-            playTap()
-            changeTheme(id)
-          }}
-        />
-      </div>
-
-      {saved && <p className={`animate-pop text-sm font-semibold ${theme.accentText}`}>Saved!</p>}
-
-      <BackButton onClick={() => navigate(-1)} className={theme.bodyText} />
+      {customizing && (
+        <div className="flex w-full max-w-xs flex-col gap-4">
+          <div className={`flex flex-col items-center gap-3 rounded-2xl p-5 shadow-sm ${theme.cardBg}`}>
+            <h2 className={`text-sm font-semibold ${theme.bodyText}`}>Pick your avatar</h2>
+            <AvatarPicker
+              value={kid.avatar}
+              onChange={(key) => {
+                playTap()
+                changeAvatar(key)
+              }}
+            />
+          </div>
+          <div className={`flex flex-col items-center gap-3 rounded-2xl p-5 shadow-sm ${theme.cardBg}`}>
+            <h2 className={`text-sm font-semibold ${theme.bodyText}`}>Pick your theme</h2>
+            <ThemePicker
+              value={kid.theme}
+              onChange={(id) => {
+                playTap()
+                changeTheme(id)
+              }}
+            />
+          </div>
+          <div className={`flex flex-col items-center gap-3 rounded-2xl p-5 shadow-sm ${theme.cardBg}`}>
+            <h2 className={`text-sm font-semibold ${theme.bodyText}`}>Text size</h2>
+            <FontSizePicker
+              value={kid.text_size}
+              onChange={(size) => {
+                playTap()
+                changeTextSize(size)
+              }}
+            />
+          </div>
+          <div className={`flex flex-col items-center gap-3 rounded-2xl p-5 shadow-sm ${theme.cardBg}`}>
+            <h2 className={`text-sm font-semibold ${theme.bodyText}`}>Animations</h2>
+            <AnimationToggle
+              value={kid.animations_enabled}
+              onChange={(enabled) => {
+                playTap()
+                changeAnimationsEnabled(enabled)
+              }}
+            />
+          </div>
+          {saved && <p className={`animate-pop text-center text-sm font-semibold ${theme.accentText}`}>Saved!</p>}
+        </div>
+      )}
     </div>
   )
 }
