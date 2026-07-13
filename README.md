@@ -1,4 +1,4 @@
-# Quran Memorization & Qaida Practice App
+# Little Hafiz
 
 A multi-kid, multi-device family app for daily Quran memorization and Arabic reading (Qaida) practice.
 

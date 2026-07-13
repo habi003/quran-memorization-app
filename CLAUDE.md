@@ -29,7 +29,7 @@ Manual testing needs a real Supabase login the assistant doesn't have — a brow
 
 ## What This Is
 
-A multi-kid, multi-device family app for daily Quran memorization + Arabic reading (Qaida) practice:
+**Little Hafiz** — a multi-kid, multi-device family app for daily Quran memorization + Arabic reading (Qaida) practice:
 - **Kid mode** (tablet, e.g. iPad): today's practice — a few memorization ayahs + a few reading lines, big buttons, audio, streaks.
 - **Parent mode** (phone/laptop): assign surahs, set daily targets, digitize the Qaida book lesson-by-lesson, watch progress live.
 - One parent account owns the family; multiple kid profiles; real-time sync across devices (Realtime is milestone 5, not yet built — Parent Dashboard currently polls/refetches).
