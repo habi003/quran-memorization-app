@@ -59,3 +59,13 @@ export function playError() {
   playTone({ frequency: 220, duration: 0.18, type: 'sine', volume: 0.12 })
   playTone({ frequency: 196, duration: 0.22, delay: 0.1, type: 'sine', volume: 0.12 })
 }
+
+// Reserved for the rarer badge-unlock moment — a longer, brighter arpeggio
+// than playSuccess's 3-note one, since "I got it!" already plays playSuccess
+// for the everyday interaction feedback.
+export function playBadgeUnlock() {
+  playTone({ frequency: 523.25, duration: 0.16, delay: 0, type: 'sine', volume: 0.18 }) // C5
+  playTone({ frequency: 659.25, duration: 0.16, delay: 0.1, type: 'sine', volume: 0.18 }) // E5
+  playTone({ frequency: 783.99, duration: 0.16, delay: 0.2, type: 'sine', volume: 0.18 }) // G5
+  playTone({ frequency: 1046.5, duration: 0.3, delay: 0.3, type: 'sine', volume: 0.2 }) // C6
+}

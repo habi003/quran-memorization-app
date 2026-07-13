@@ -87,6 +87,32 @@ export const THEMES: Theme[] = [
     accentBgHover: 'hover:bg-orange-600',
     accentText: 'text-orange-700',
   },
+  // Reward-only themes, unlocked via milestone badges — see
+  // cosmeticUnlocks.ts. Never shown as options until earned.
+  {
+    id: 'royal',
+    label: 'Royal',
+    swatch: 'bg-violet-500',
+    pageBg: 'bg-violet-50',
+    cardBg: 'bg-white',
+    heading: 'text-violet-900',
+    bodyText: 'text-violet-600',
+    accentBg: 'bg-violet-600',
+    accentBgHover: 'hover:bg-violet-700',
+    accentText: 'text-violet-700',
+  },
+  {
+    id: 'aurora',
+    label: 'Aurora',
+    swatch: 'bg-pink-400',
+    pageBg: 'bg-pink-50',
+    cardBg: 'bg-white',
+    heading: 'text-pink-900',
+    bodyText: 'text-pink-600',
+    accentBg: 'bg-pink-500',
+    accentBgHover: 'hover:bg-pink-600',
+    accentText: 'text-pink-700',
+  },
 ]
 
 export const DEFAULT_THEME_ID = 'default-light'
