@@ -1,10 +1,14 @@
 import {
   Bird,
   Cat,
+  Crown,
   Dog,
+  Feather,
   Fish,
+  Gem,
   Heart,
   Moon,
+  PawPrint,
   Rabbit,
   Rocket,
   Squirrel,
@@ -30,6 +34,12 @@ export const AVATAR_ICONS: Record<string, LucideIcon> = {
   rocket: Rocket,
   sun: Sun,
   moon: Moon,
+  // Reward-only avatars, unlocked via milestone badges — see
+  // cosmeticUnlocks.ts. Never shown as options until earned.
+  crown: Crown,
+  gem: Gem,
+  feather: Feather,
+  paw: PawPrint,
 }
 
 export type AvatarKey = keyof typeof AVATAR_ICONS

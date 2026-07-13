@@ -96,6 +96,7 @@ export type StarsReason =
   | 'ayah_complete'
   | 'surah_complete'
   | 'streak_bonus'
+  | 'milestone_bonus'
   | 'item_complete'
   | 'perfect_day'
   | 'lesson_complete'
@@ -113,4 +114,7 @@ export interface Badge {
   kid_id: string
   badge_key: string
   earned_at: string
+  // Null until the kid taps to unlock it in Kid Mode — see badge_claims
+  // migration. Legacy rows (pre-claim system) are backfilled to earned_at.
+  claimed_at: string | null
 }

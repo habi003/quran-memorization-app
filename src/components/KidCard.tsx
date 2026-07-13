@@ -9,9 +9,10 @@ interface KidCardProps {
   onClick?: () => void
   reciterName?: string
   streakDays?: number
+  title?: string
 }
 
-export function KidCard({ kid, onClick, reciterName, streakDays }: KidCardProps) {
+export function KidCard({ kid, onClick, reciterName, streakDays, title }: KidCardProps) {
   const initials = kid.name
     .split(' ')
     .map((part) => part[0])
@@ -37,6 +38,9 @@ export function KidCard({ kid, onClick, reciterName, streakDays }: KidCardProps)
         {Icon ? <Icon className="h-12 w-12" /> : (initials || '?')}
       </div>
       <span className="text-xl font-semibold text-slate-800">{kid.name}</span>
+      {title && (
+        <span className="rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-700">{title}</span>
+      )}
       {reciterName && <span className="text-xs text-slate-400">{reciterName}</span>}
       <span className="flex items-center gap-2 text-xs text-slate-400">
         <span className="flex items-center gap-0.5">

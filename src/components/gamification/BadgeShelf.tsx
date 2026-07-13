@@ -1,66 +1,101 @@
-import { BADGE_CATALOG, getBadgeEntry } from '../../lib/badgeCatalog'
+import { BADGE_CATALOG } from '../../lib/badgeCatalog'
+import { STREAK_MILESTONES, SURAH_MILESTONES, milestoneSurahBadgeKey } from '../../lib/gamification'
 import type { Badge } from '../../types/database'
 import type { Theme } from '../../lib/themes'
+import { CircularProgress } from './CircularProgress'
 
 interface BadgeShelfProps {
   badges: Badge[]
   theme: Theme
+  streak: number
+  masteredCount: number
+  onClaim: (badgeKey: string) => void
 }
 
-const FIXED_BADGE_KEYS = ['first_ayah', 'streak_3', 'streak_7', 'streak_30']
+const FIXED_BADGE_KEYS = [
+  'first_ayah',
+  ...STREAK_MILESTONES.map((t) => `streak_${t}`),
+  ...SURAH_MILESTONES.map((c) => milestoneSurahBadgeKey(c)),
+]
 
-// Colored icon for earned badges, grey silhouette + hint for locked ones,
-// per spec §7. Surah-mastery badges aren't pre-enumerated (114 locked tiles
-// would overwhelm the shelf) — only earned ones are shown, as a separate row.
-export function BadgeShelf({ badges, theme }: BadgeShelfProps) {
-  const earnedKeys = new Set(badges.map((b) => b.badge_key))
-  const surahBadges = badges.filter((b) => b.badge_key.startsWith('surah_complete_'))
+const STREAK_KEY_PATTERN = /^streak_(\d+)$/
+const SURAH_MILESTONE_KEY_PATTERN = /^milestone_surahs_(\d+)$/
+
+// Locked slots show live progress toward the next tier (streak days or
+// mastered-surah count) rather than a flat "not yet" circle. Binary badges
+// (first_ayah) have no meaningful fraction, so they just render an empty ring.
+function getProgress(key: string, streak: number, masteredCount: number): { value: number; max: number } {
+  const streakMatch = STREAK_KEY_PATTERN.exec(key)
+  if (streakMatch) return { value: streak, max: Number(streakMatch[1]) }
+  const surahMatch = SURAH_MILESTONE_KEY_PATTERN.exec(key)
+  if (surahMatch) return { value: masteredCount, max: Number(surahMatch[1]) }
+  return { value: 0, max: 1 }
+}
+
+// Three states per badge: earned (claimed_at set, solid), pending
+// (condition met but not yet tapped — glowing "Tap to unlock!"), locked
+// (condition not met — grey progress ring toward the next tier). Per-surah
+// mastery badges (surah_complete_<n>) aren't shown here at all — with a kid
+// potentially mastering 40-50+ surahs over time, a growing list of
+// individual surah pills stops being a useful "shelf" — milestone counts
+// (5/10/25/50... surahs) are the meaningful progress signal instead.
+// Newest-claimed first, so the badge a kid just earned is the first thing
+// they see next time they open the shelf — pending/locked ones keep their
+// natural difficulty order after that (they have no "unlocked" moment yet).
+function orderByRecency(keys: string[], badgeByKey: Map<string, Badge>): string[] {
+  const earned = keys
+    .filter((k) => badgeByKey.get(k)?.claimed_at)
+    .sort((a, b) => badgeByKey.get(b)!.claimed_at!.localeCompare(badgeByKey.get(a)!.claimed_at!))
+  const rest = keys.filter((k) => !badgeByKey.get(k)?.claimed_at)
+  return [...earned, ...rest]
+}
+
+export function BadgeShelf({ badges, theme, streak, masteredCount, onClaim }: BadgeShelfProps) {
+  const badgeByKey = new Map(badges.map((b) => [b.badge_key, b]))
+  const orderedKeys = orderByRecency(FIXED_BADGE_KEYS, badgeByKey)
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-4 gap-3">
-        {FIXED_BADGE_KEYS.map((key) => {
-          const entry = BADGE_CATALOG[key]
-          const Icon = entry.icon
-          const earned = earnedKeys.has(key)
-          return (
-            <div key={key} className="flex flex-col items-center gap-1" title={entry.description}>
-              <div
-                className={`flex h-12 w-12 items-center justify-center rounded-full ${
-                  earned ? `text-white ${theme.accentBg}` : 'bg-slate-200 text-slate-400'
-                }`}
-              >
-                <Icon className="h-6 w-6" />
-              </div>
-              <span className={`text-center text-[11px] leading-tight ${earned ? theme.bodyText : 'text-slate-300'}`}>
-                {entry.label}
-              </span>
-            </div>
-          )
-        })}
-      </div>
+    <div className="grid grid-cols-5 gap-x-1.5 gap-y-2">
+      {orderedKeys.map((key) => {
+        const entry = BADGE_CATALOG[key]
+        const Icon = entry.icon
+        const badge = badgeByKey.get(key)
+        const earned = Boolean(badge?.claimed_at)
+        const pending = Boolean(badge && !badge.claimed_at)
+        const progress = getProgress(key, streak, masteredCount)
 
-      {surahBadges.length > 0 && (
-        <div className="flex flex-col gap-1.5">
-          <h3 className={`text-xs font-semibold ${theme.bodyText}`}>Surahs mastered</h3>
-          <div className="flex flex-wrap gap-2">
-            {surahBadges.map((b) => {
-              const entry = getBadgeEntry(b.badge_key)
-              if (!entry) return null
-              const Icon = entry.icon
-              return (
-                <span
-                  key={b.badge_key}
-                  className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium text-white ${theme.accentBg}`}
-                >
-                  <Icon className="h-3 w-3" />
-                  {entry.label}
-                </span>
-              )
-            })}
-          </div>
-        </div>
-      )}
+        return (
+          <button
+            key={key}
+            type="button"
+            disabled={!pending}
+            onClick={() => pending && onClaim(key)}
+            title={entry.description}
+            className={`flex flex-col items-center gap-0.5 ${pending ? 'active:scale-90' : ''}`}
+          >
+            {earned ? (
+              <div className={`flex h-9 w-9 items-center justify-center rounded-full text-white ${theme.accentBg}`}>
+                <Icon className="h-4 w-4" />
+              </div>
+            ) : pending ? (
+              <div className="animate-pop flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-amber-400 to-amber-500 text-white ring-2 ring-amber-200">
+                <Icon className="h-4 w-4" />
+              </div>
+            ) : (
+              <CircularProgress value={progress.value} max={progress.max} size={36} strokeWidth={3}>
+                <Icon className="h-3.5 w-3.5 text-slate-300" />
+              </CircularProgress>
+            )}
+            <span
+              className={`text-center text-[9px] leading-tight ${
+                earned ? theme.bodyText : pending ? 'font-semibold text-amber-600' : 'text-slate-300'
+              }`}
+            >
+              {pending ? 'Unlock!' : entry.label}
+            </span>
+          </button>
+        )
+      })}
     </div>
   )
 }

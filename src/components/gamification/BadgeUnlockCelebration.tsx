@@ -1,16 +1,23 @@
 import { useEffect } from 'react'
+import { Palette, Smile } from 'lucide-react'
 import { getBadgeEntry } from '../../lib/badgeCatalog'
 import { playBadgeUnlock } from '../../lib/sounds'
+
+export interface UnlockedCosmetic {
+  type: 'avatar' | 'theme'
+  label: string
+}
 
 interface BadgeUnlockCelebrationProps {
   badgeKey: string
   onDismiss: () => void
+  unlockedCosmetic?: UnlockedCosmetic
 }
 
 // Rarer, bigger moment than the small frequent star pops, so this is a
 // tap-to-dismiss overlay (same modal pattern as SurahReview/WelcomeNamePrompt)
 // rather than an auto-timeout toast.
-export function BadgeUnlockCelebration({ badgeKey, onDismiss }: BadgeUnlockCelebrationProps) {
+export function BadgeUnlockCelebration({ badgeKey, onDismiss, unlockedCosmetic }: BadgeUnlockCelebrationProps) {
   const entry = getBadgeEntry(badgeKey)
 
   useEffect(() => {
@@ -33,6 +40,12 @@ export function BadgeUnlockCelebration({ badgeKey, onDismiss }: BadgeUnlockCeleb
         <h2 className="text-lg font-semibold text-slate-800">Badge unlocked!</h2>
         <p className="text-base font-medium text-slate-700">{entry.label}</p>
         <p className="text-sm text-slate-500">{entry.description}</p>
+        {unlockedCosmetic && (
+          <p className="flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700">
+            {unlockedCosmetic.type === 'avatar' ? <Smile className="h-4 w-4" /> : <Palette className="h-4 w-4" />}
+            New {unlockedCosmetic.type} unlocked: {unlockedCosmetic.label}!
+          </p>
+        )}
         <button
           type="button"
           onClick={onDismiss}

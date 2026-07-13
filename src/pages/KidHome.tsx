@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Settings2, RotateCcw, BookOpen } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Assignment, ApiSurahMeta, Ayah, Badge, Kid, SurahContent, TargetPeriod } from '../types/database'
 import { AVATAR_ICONS } from '../lib/avatarIcons'
-import { getTheme } from '../lib/themes'
+import { getTheme, THEMES } from '../lib/themes'
 import { fetchSurah, fetchSurahList } from '../lib/quran'
 import {
   getActiveAssignment,
@@ -13,12 +13,18 @@ import {
   logPracticeSessionComplete,
   markAssignmentMastered,
   getSurahsForReview,
+  getMasteredSurahNumbers,
 } from '../lib/memorization'
-import { computeStreak, getBadges, processAyahComplete, processSurahComplete } from '../lib/gamification'
-import { AvatarPicker } from '../components/AvatarPicker'
-import { ThemePicker } from '../components/ThemePicker'
-import { FontSizePicker } from '../components/FontSizePicker'
-import { AnimationToggle } from '../components/AnimationToggle'
+import { claimBadge, computeStreak, getBadges, processAyahComplete, processSurahComplete } from '../lib/gamification'
+import { BADGE_CATALOG, TITLE_CATALOG, getCurrentTitle } from '../lib/badgeCatalog'
+import {
+  COSMETIC_UNLOCKS,
+  getOrderedAvatarKeys,
+  getOrderedThemeIds,
+  getUnlockedAvatarKeys,
+  getUnlockedThemeIds,
+} from '../lib/cosmeticUnlocks'
+import { CustomizePanel, type EarnedTitle } from '../components/CustomizePanel'
 import { getTextSizeScale } from '../lib/textSize'
 import { LoadingScreen } from '../components/LoadingScreen'
 import { BackButton } from '../components/BackButton'
@@ -27,8 +33,8 @@ import { ProgressDots } from '../components/quran/ProgressDots'
 import { SurahReview } from '../components/quran/SurahReview'
 import { StreakFlame } from '../components/gamification/StreakFlame'
 import { StarsChip } from '../components/gamification/StarsChip'
-import { BadgeShelf } from '../components/gamification/BadgeShelf'
 import { BadgeUnlockCelebration } from '../components/gamification/BadgeUnlockCelebration'
+import { TitleCertificateModal } from '../components/gamification/TitleCertificateModal'
 import { playTap, playSuccess } from '../lib/sounds'
 
 type PracticeView =
@@ -58,7 +64,68 @@ export function KidHome() {
   const [reviewingSurah, setReviewingSurah] = useState<{ number: number; name: string } | null>(null)
   const [streak, setStreak] = useState(0)
   const [badges, setBadges] = useState<Badge[]>([])
+  const [masteredCount, setMasteredCount] = useState(0)
   const [celebratingBadges, setCelebratingBadges] = useState<string[]>([])
+  const [showCertificate, setShowCertificate] = useState<EarnedTitle | null>(null)
+  // Just-unlocked, never-picked cosmetics — cleared the moment the kid taps
+  // one in the picker. Session-only (not persisted): a fresh page load has
+  // no way to know "already discovered" vs "unlocked a while ago" without a
+  // new DB column, and re-showing the glow once per session is harmless.
+  const [newAvatarKeys, setNewAvatarKeys] = useState<Set<string>>(new Set())
+  const [newThemeIds, setNewThemeIds] = useState<Set<string>>(new Set())
+
+  const claimedBadgeKeys = useMemo(() => badges.filter((b) => b.claimed_at).map((b) => b.badge_key), [badges])
+  const claimedBadgesWithTimestamps = useMemo(
+    () => badges.filter((b): b is Badge & { claimed_at: string } => Boolean(b.claimed_at)).map((b) => ({ badgeKey: b.badge_key, claimedAt: b.claimed_at })),
+    [badges],
+  )
+  const unlockedAvatarKeys = useMemo(() => getUnlockedAvatarKeys(claimedBadgeKeys), [claimedBadgeKeys])
+  const unlockedThemeIds = useMemo(() => getUnlockedThemeIds(claimedBadgeKeys), [claimedBadgeKeys])
+  // Newest-unlocked reward first, then the rest of the catalog (still-locked
+  // ones) in their normal order — passed as the pickers' display order.
+  const orderedAvatarKeys = useMemo(() => {
+    const unlocked = getOrderedAvatarKeys(claimedBadgesWithTimestamps)
+    const unlockedSet = new Set(unlocked)
+    return [...unlocked, ...Object.keys(AVATAR_ICONS).filter((k) => !unlockedSet.has(k))]
+  }, [claimedBadgesWithTimestamps])
+  const orderedThemeIds = useMemo(() => {
+    const unlocked = getOrderedThemeIds(claimedBadgesWithTimestamps)
+    const unlockedSet = new Set(unlocked)
+    return [...unlocked, ...THEMES.map((t) => t.id).filter((id) => !unlockedSet.has(id))]
+  }, [claimedBadgesWithTimestamps])
+  const hasPendingClaims = useMemo(() => badges.some((b) => !b.claimed_at), [badges])
+  // Every claimed title, most recent first — powers the certificates list.
+  const earnedTitles: EarnedTitle[] = useMemo(() => {
+    return badges
+      .filter((b): b is Badge & { claimed_at: string } => Boolean(b.claimed_at) && Boolean(TITLE_CATALOG[b.badge_key]))
+      .map((b) => ({
+        badgeKey: b.badge_key,
+        title: TITLE_CATALOG[b.badge_key],
+        description: BADGE_CATALOG[b.badge_key]?.description ?? '',
+        earnedAt: b.claimed_at,
+      }))
+      .sort((a, b) => b.earnedAt.localeCompare(a.earnedAt))
+  }, [badges])
+  // Highest-tier claimed title, if any (shared getCurrentTitle so this means
+  // the same thing here as it does on the Parent Dashboard's KidCard).
+  const currentTitle: EarnedTitle | null = useMemo(() => {
+    const info = getCurrentTitle(claimedBadgeKeys)
+    if (!info) return null
+    const badge = badges.find((b) => b.badge_key === info.badgeKey)
+    return { ...info, earnedAt: badge?.claimed_at ?? new Date().toISOString() }
+  }, [claimedBadgeKeys, badges])
+  // Cosmetic reward tied to the badge currently being celebrated, if any —
+  // shown as an extra line in BadgeUnlockCelebration.
+  const celebratingCosmetic = useMemo(() => {
+    const badgeKey = celebratingBadges[0]
+    const reward = badgeKey ? COSMETIC_UNLOCKS[badgeKey] : undefined
+    if (!reward) return undefined
+    const label =
+      reward.type === 'theme'
+        ? (THEMES.find((t) => t.id === reward.key)?.label ?? reward.key)
+        : reward.key.charAt(0).toUpperCase() + reward.key.slice(1)
+    return { type: reward.type, label }
+  }, [celebratingBadges])
 
   const loadPractice = useCallback(async (currentKid: Kid) => {
     setView({ kind: 'loading' })
@@ -120,9 +187,14 @@ export function KidHome() {
 
   const loadGamification = useCallback(async (currentKidId: string) => {
     try {
-      const [currentStreak, currentBadges] = await Promise.all([computeStreak(currentKidId), getBadges(currentKidId)])
+      const [currentStreak, currentBadges, masteredNumbers] = await Promise.all([
+        computeStreak(currentKidId),
+        getBadges(currentKidId),
+        getMasteredSurahNumbers(currentKidId),
+      ])
       setStreak(currentStreak)
       setBadges(currentBadges)
+      setMasteredCount(masteredNumbers.length)
     } catch {
       // Stars/streak/badges are bonus content, same as review surahs — a
       // failure here shouldn't block the main practice screen.
@@ -180,23 +252,15 @@ export function KidHome() {
     // Gamification is bonus feedback on top of an already-successful write —
     // a failure here (network hiccup, etc.) must never block the kid's
     // practice flow, so errors are swallowed rather than surfaced as `view:
-    // 'error'` (same treatment as loadReviewSurahs).
+    // 'error'` (same treatment as loadReviewSurahs). processAyahComplete only
+    // *records* any newly-crossed milestone as pending — it never
+    // auto-claims — so badges are refetched to pick up the glow/notification
+    // dot, not to trigger a celebration.
     try {
       const result = await processAyahComplete(kid.id)
       setKid((k) => (k ? { ...k, stars_balance: k.stars_balance + result.starsAwarded } : k))
       setStreak(result.streak)
-      if (result.newBadgeKeys.length > 0) {
-        setBadges((prev) => [
-          ...prev,
-          ...result.newBadgeKeys.map((badge_key) => ({
-            id: badge_key,
-            kid_id: kid.id,
-            badge_key,
-            earned_at: new Date().toISOString(),
-          })),
-        ])
-        setCelebratingBadges((prev) => [...prev, ...result.newBadgeKeys])
-      }
+      setBadges(await getBadges(kid.id))
     } catch (err) {
       console.error('Gamification update failed:', err)
     }
@@ -223,18 +287,8 @@ export function KidHome() {
         try {
           const result = await processSurahComplete(kid.id, assignment.surah_number)
           setKid((k) => (k ? { ...k, stars_balance: k.stars_balance + result.starsAwarded } : k))
-          if (result.newBadgeKeys.length > 0) {
-            setBadges((prev) => [
-              ...prev,
-              ...result.newBadgeKeys.map((badge_key) => ({
-                id: badge_key,
-                kid_id: kid.id,
-                badge_key,
-                earned_at: new Date().toISOString(),
-              })),
-            ])
-            setCelebratingBadges((prev) => [...prev, ...result.newBadgeKeys])
-          }
+          setMasteredCount(result.masteredCount)
+          setBadges(await getBadges(kid.id))
         } catch (err) {
           console.error('Gamification update failed:', err)
         }
@@ -254,6 +308,45 @@ export function KidHome() {
     }
   }
 
+  // Tapping a pending badge in the Badge Shelf is the "unlock" moment itself
+  // — claimBadge does a conditional UPDATE guarded by claimed_at IS NULL, so
+  // a lost race (double-tap, second device) just no-ops here.
+  async function handleClaimBadge(badgeKey: string) {
+    if (!kid) return
+    try {
+      const result = await claimBadge(kid.id, badgeKey)
+      if (!result.claimed) return
+      const claimedAt = new Date().toISOString()
+      setBadges((prev) => prev.map((b) => (b.badge_key === badgeKey ? { ...b, claimed_at: claimedAt } : b)))
+      if (result.starsAwarded > 0) {
+        setKid((k) => (k ? { ...k, stars_balance: k.stars_balance + result.starsAwarded } : k))
+      }
+      const reward = COSMETIC_UNLOCKS[badgeKey]
+      if (reward?.type === 'avatar') setNewAvatarKeys((prev) => new Set(prev).add(reward.key))
+      else if (reward?.type === 'theme') setNewThemeIds((prev) => new Set(prev).add(reward.key))
+      setCelebratingBadges((prev) => [...prev, badgeKey])
+    } catch (err) {
+      console.error('Claim failed:', err)
+    }
+  }
+
+  // Dismissing a badge celebration chains into the title certificate when
+  // the badge just claimed is a title-tier one.
+  function handleDismissCelebration() {
+    const badgeKey = celebratingBadges[0]
+    setCelebratingBadges((prev) => prev.slice(1))
+    const title = badgeKey ? TITLE_CATALOG[badgeKey] : undefined
+    if (badgeKey && title) {
+      const badge = badges.find((b) => b.badge_key === badgeKey)
+      setShowCertificate({
+        badgeKey,
+        title,
+        description: BADGE_CATALOG[badgeKey]?.description ?? '',
+        earnedAt: badge?.claimed_at ?? new Date().toISOString(),
+      })
+    }
+  }
+
   function flashSaved() {
     playSuccess()
     setSaved(true)
@@ -265,6 +358,12 @@ export function KidHome() {
     const { error: updateError } = await supabase.from('kids').update({ avatar: key }).eq('id', kidId)
     if (updateError) return
     setKid((k) => (k ? { ...k, avatar: key } : k))
+    setNewAvatarKeys((prev) => {
+      if (!prev.has(key)) return prev
+      const next = new Set(prev)
+      next.delete(key)
+      return next
+    })
     flashSaved()
   }
 
@@ -273,6 +372,12 @@ export function KidHome() {
     const { error: updateError } = await supabase.from('kids').update({ theme: id }).eq('id', kidId)
     if (updateError) return
     setKid((k) => (k ? { ...k, theme: id } : k))
+    setNewThemeIds((prev) => {
+      if (!prev.has(id)) return prev
+      const next = new Set(prev)
+      next.delete(id)
+      return next
+    })
     flashSaved()
   }
 
@@ -315,6 +420,9 @@ export function KidHome() {
         className={`absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full transition hover:bg-black/5 active:scale-90 ${theme.bodyText}`}
       >
         <Settings2 className="h-5 w-5" />
+        {hasPendingClaims && (
+          <span className="absolute right-1 top-1 h-2.5 w-2.5 animate-pop rounded-full bg-red-500 ring-2 ring-white" />
+        )}
       </button>
 
       <div className="mt-10 flex flex-col items-center gap-2">
@@ -324,9 +432,21 @@ export function KidHome() {
           {Icon ? <Icon className="h-10 w-10" /> : kid.name[0]?.toUpperCase()}
         </div>
         <h1 className={`text-xl font-bold ${theme.heading}`}>{kid.name}</h1>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-center gap-2">
           <StreakFlame streak={streak} theme={theme} />
           <StarsChip stars={kid.stars_balance} theme={theme} />
+          {currentTitle && (
+            <button
+              type="button"
+              onClick={() => {
+                playTap()
+                setShowCertificate(currentTitle)
+              }}
+              className={`rounded-full px-3 py-1.5 text-sm font-semibold shadow-sm transition active:scale-95 ${theme.cardBg} ${theme.accentText}`}
+            >
+              {currentTitle.title}
+            </button>
+          )}
         </div>
       </div>
 
@@ -422,58 +542,46 @@ export function KidHome() {
       {celebratingBadges.length > 0 && (
         <BadgeUnlockCelebration
           badgeKey={celebratingBadges[0]}
-          onDismiss={() => setCelebratingBadges((prev) => prev.slice(1))}
+          onDismiss={handleDismissCelebration}
+          unlockedCosmetic={celebratingCosmetic}
+        />
+      )}
+
+      {showCertificate && (
+        <TitleCertificateModal
+          kidName={kid.name}
+          title={showCertificate.title}
+          description={showCertificate.description}
+          earnedAt={showCertificate.earnedAt}
+          onDismiss={() => setShowCertificate(null)}
         />
       )}
 
       {customizing && (
-        <div className="flex w-full max-w-xs flex-col gap-4">
-          <div className={`flex flex-col gap-3 rounded-2xl p-5 shadow-sm ${theme.cardBg}`}>
-            <h2 className={`text-center text-sm font-semibold ${theme.bodyText}`}>Badges</h2>
-            <BadgeShelf badges={badges} theme={theme} />
-          </div>
-          <div className={`flex flex-col items-center gap-3 rounded-2xl p-5 shadow-sm ${theme.cardBg}`}>
-            <h2 className={`text-sm font-semibold ${theme.bodyText}`}>Pick your avatar</h2>
-            <AvatarPicker
-              value={kid.avatar}
-              onChange={(key) => {
-                playTap()
-                changeAvatar(key)
-              }}
-            />
-          </div>
-          <div className={`flex flex-col items-center gap-3 rounded-2xl p-5 shadow-sm ${theme.cardBg}`}>
-            <h2 className={`text-sm font-semibold ${theme.bodyText}`}>Pick your theme</h2>
-            <ThemePicker
-              value={kid.theme}
-              onChange={(id) => {
-                playTap()
-                changeTheme(id)
-              }}
-            />
-          </div>
-          <div className={`flex flex-col items-center gap-3 rounded-2xl p-5 shadow-sm ${theme.cardBg}`}>
-            <h2 className={`text-sm font-semibold ${theme.bodyText}`}>Text size</h2>
-            <FontSizePicker
-              value={kid.text_size}
-              onChange={(size) => {
-                playTap()
-                changeTextSize(size)
-              }}
-            />
-          </div>
-          <div className={`flex flex-col items-center gap-3 rounded-2xl p-5 shadow-sm ${theme.cardBg}`}>
-            <h2 className={`text-sm font-semibold ${theme.bodyText}`}>Animations</h2>
-            <AnimationToggle
-              value={kid.animations_enabled}
-              onChange={(enabled) => {
-                playTap()
-                changeAnimationsEnabled(enabled)
-              }}
-            />
-          </div>
-          {saved && <p className={`animate-pop text-center text-sm font-semibold ${theme.accentText}`}>Saved!</p>}
-        </div>
+        <CustomizePanel
+          theme={theme}
+          saved={saved}
+          badges={badges}
+          streak={streak}
+          masteredCount={masteredCount}
+          earnedTitles={earnedTitles}
+          onClaimBadge={handleClaimBadge}
+          onOpenCertificate={setShowCertificate}
+          avatar={kid.avatar}
+          onChangeAvatar={changeAvatar}
+          unlockedAvatarKeys={unlockedAvatarKeys}
+          newAvatarKeys={newAvatarKeys}
+          orderedAvatarKeys={orderedAvatarKeys}
+          themeId={kid.theme}
+          onChangeTheme={changeTheme}
+          unlockedThemeIds={unlockedThemeIds}
+          newThemeIds={newThemeIds}
+          orderedThemeIds={orderedThemeIds}
+          textSize={kid.text_size}
+          onChangeTextSize={changeTextSize}
+          animationsEnabled={kid.animations_enabled}
+          onChangeAnimationsEnabled={changeAnimationsEnabled}
+        />
       )}
     </div>
   )
