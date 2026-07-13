@@ -23,12 +23,21 @@ function weekStartLocalDate(): Date {
   return monday
 }
 
+// Returns the kid's current assignment regardless of status — not just
+// 'learning'. A 'mastered' assignment is still what KidHome should show
+// (the surah-complete screen, with its "revise while you wait" option) until
+// the parent assigns the next one; filtering to 'learning' only made that
+// screen disappear on any fresh page load after mastery (it only worked
+// within the same live session that just finished the last ayah). Ordering
+// by assigned_at desc and taking the first row is safe regardless of status
+// — a reassignment always inserts a newer row and flips the old one to
+// 'superseded', so the newest row is always the current one (same pattern
+// ParentDashboard.tsx's loadAssignments already relies on).
 export async function getActiveAssignment(kidId: string): Promise<Assignment | null> {
   const { data, error } = await supabase
     .from('assignments')
     .select('*')
     .eq('kid_id', kidId)
-    .eq('status', 'learning')
     .order('assigned_at', { ascending: false })
     .limit(1)
     .maybeSingle()
