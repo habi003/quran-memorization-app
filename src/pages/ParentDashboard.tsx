@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase'
 import { hasPin } from '../lib/pin'
 import { fetchSurahList, fetchReciters } from '../lib/quran'
 import { assignSurah, markSurahAlreadyCompleted, type TargetPeriod } from '../lib/memorization'
+import { checkAndAwardSurahCompleteBadge, streakFromDates } from '../lib/gamification'
 import { useAuth } from '../context/AuthContext'
 import { getDisplayName, hasCustomName } from '../lib/displayName'
 import type { ApiSurahMeta, Assignment, Kid, MemorizationProgress } from '../types/database'
@@ -38,6 +39,7 @@ export function ParentDashboard() {
   const [assigningKid, setAssigningKid] = useState<Kid | null>(null)
   const [markingCompletedKid, setMarkingCompletedKid] = useState<Kid | null>(null)
   const [reciterNames, setReciterNames] = useState<Record<string, string>>({})
+  const [streaksByKid, setStreaksByKid] = useState<Record<string, number>>({})
 
   const loadKids = useCallback(async () => {
     const { data, error: fetchError } = await supabase.from('kids').select('*').order('created_at')
@@ -63,6 +65,7 @@ export function ParentDashboard() {
     if (kidList.length === 0) {
       setAssignments({})
       setMemorizedCounts({})
+      setStreaksByKid({})
       setAssignmentsLoading(false)
       return
     }
@@ -70,11 +73,13 @@ export function ParentDashboard() {
     setAssignmentsLoading(true)
     const kidIds = kidList.map((k) => k.id)
 
-    const [assignmentRes, progressRes, surahList] = await Promise.all([
+    const [assignmentRes, progressRes, surahList, practiceLogRes] = await Promise.all([
       supabase.from('assignments').select('*').in('kid_id', kidIds).order('assigned_at', { ascending: false }),
       supabase.from('memorization_progress').select('kid_id, surah_number, status').in('kid_id', kidIds),
       fetchSurahList().catch(() => [] as ApiSurahMeta[]),
+      supabase.from('practice_log').select('kid_id, date').in('kid_id', kidIds),
     ])
+    if (practiceLogRes.error) setError(practiceLogRes.error.message)
 
     if (assignmentRes.error) setError(assignmentRes.error.message)
     if (progressRes.error) setError(progressRes.error.message)
@@ -97,9 +102,17 @@ export function ParentDashboard() {
     const surahMap: Record<number, ApiSurahMeta> = {}
     for (const s of surahList) surahMap[s.number] = s
 
+    const datesByKid: Record<string, string[]> = {}
+    for (const row of (practiceLogRes.data ?? []) as { kid_id: string; date: string }[]) {
+      ;(datesByKid[row.kid_id] ??= []).push(row.date)
+    }
+    const streaks: Record<string, number> = {}
+    for (const id of kidIds) streaks[id] = streakFromDates(datesByKid[id] ?? [])
+
     setAssignments(currentByKid)
     setMemorizedCounts(counts)
     setSurahMetaByNumber(surahMap)
+    setStreaksByKid(streaks)
     setAssignmentsLoading(false)
   }, [])
 
@@ -117,6 +130,9 @@ export function ParentDashboard() {
     if (!markingCompletedKid) return
     for (const s of surahs) {
       await markSurahAlreadyCompleted(markingCompletedKid.id, s.number, s.numberOfAyahs)
+      // Badge only, no stars — this is backfilling history, not a real
+      // practice event (see gamification.ts's checkAndAwardSurahCompleteBadge).
+      await checkAndAwardSurahCompleteBadge(markingCompletedKid.id, s.number)
     }
     if (kids) await loadAssignments(kids)
   }
@@ -185,6 +201,7 @@ export function ParentDashboard() {
                 kid={kid}
                 onClick={() => navigate(`/kids/${kid.id}/home`)}
                 reciterName={reciterNames[kid.preferred_reciter]}
+                streakDays={streaksByKid[kid.id]}
               />
             ))}
           </div>

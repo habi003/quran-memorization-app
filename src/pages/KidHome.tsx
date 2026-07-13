@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Settings2, RotateCcw, BookOpen } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import type { Assignment, ApiSurahMeta, Ayah, Kid, SurahContent, TargetPeriod } from '../types/database'
+import type { Assignment, ApiSurahMeta, Ayah, Badge, Kid, SurahContent, TargetPeriod } from '../types/database'
 import { AVATAR_ICONS } from '../lib/avatarIcons'
 import { getTheme } from '../lib/themes'
 import { fetchSurah, fetchSurahList } from '../lib/quran'
@@ -14,6 +14,7 @@ import {
   markAssignmentMastered,
   getSurahsForReview,
 } from '../lib/memorization'
+import { computeStreak, getBadges, processAyahComplete, processSurahComplete } from '../lib/gamification'
 import { AvatarPicker } from '../components/AvatarPicker'
 import { ThemePicker } from '../components/ThemePicker'
 import { FontSizePicker } from '../components/FontSizePicker'
@@ -24,6 +25,10 @@ import { BackButton } from '../components/BackButton'
 import { MemorizationFlow } from '../components/quran/MemorizationFlow'
 import { ProgressDots } from '../components/quran/ProgressDots'
 import { SurahReview } from '../components/quran/SurahReview'
+import { StreakFlame } from '../components/gamification/StreakFlame'
+import { StarsChip } from '../components/gamification/StarsChip'
+import { BadgeShelf } from '../components/gamification/BadgeShelf'
+import { BadgeUnlockCelebration } from '../components/gamification/BadgeUnlockCelebration'
 import { playTap, playSuccess } from '../lib/sounds'
 
 type PracticeView =
@@ -51,6 +56,9 @@ export function KidHome() {
   const [customizing, setCustomizing] = useState(false)
   const [reviewSurahs, setReviewSurahs] = useState<ApiSurahMeta[]>([])
   const [reviewingSurah, setReviewingSurah] = useState<{ number: number; name: string } | null>(null)
+  const [streak, setStreak] = useState(0)
+  const [badges, setBadges] = useState<Badge[]>([])
+  const [celebratingBadges, setCelebratingBadges] = useState<string[]>([])
 
   const loadPractice = useCallback(async (currentKid: Kid) => {
     setView({ kind: 'loading' })
@@ -110,6 +118,17 @@ export function KidHome() {
     }
   }, [])
 
+  const loadGamification = useCallback(async (currentKidId: string) => {
+    try {
+      const [currentStreak, currentBadges] = await Promise.all([computeStreak(currentKidId), getBadges(currentKidId)])
+      setStreak(currentStreak)
+      setBadges(currentBadges)
+    } catch {
+      // Stars/streak/badges are bonus content, same as review surahs — a
+      // failure here shouldn't block the main practice screen.
+    }
+  }, [])
+
   useEffect(() => {
     if (!kidId) return
     let cancelled = false
@@ -129,12 +148,13 @@ export function KidHome() {
         setKid(k)
         loadPractice(k)
         loadReviewSurahs(k.id)
+        loadGamification(k.id)
       })
 
     return () => {
       cancelled = true
     }
-  }, [kidId, loadPractice, loadReviewSurahs])
+  }, [kidId, loadPractice, loadReviewSurahs, loadGamification])
 
   async function handleGotIt() {
     if (view.kind !== 'session' || !kid || !assignment) return
@@ -157,6 +177,30 @@ export function KidHome() {
       return
     }
 
+    // Gamification is bonus feedback on top of an already-successful write —
+    // a failure here (network hiccup, etc.) must never block the kid's
+    // practice flow, so errors are swallowed rather than surfaced as `view:
+    // 'error'` (same treatment as loadReviewSurahs).
+    try {
+      const result = await processAyahComplete(kid.id)
+      setKid((k) => (k ? { ...k, stars_balance: k.stars_balance + result.starsAwarded } : k))
+      setStreak(result.streak)
+      if (result.newBadgeKeys.length > 0) {
+        setBadges((prev) => [
+          ...prev,
+          ...result.newBadgeKeys.map((badge_key) => ({
+            id: badge_key,
+            kid_id: kid.id,
+            badge_key,
+            earned_at: new Date().toISOString(),
+          })),
+        ])
+        setCelebratingBadges((prev) => [...prev, ...result.newBadgeKeys])
+      }
+    } catch (err) {
+      console.error('Gamification update failed:', err)
+    }
+
     if (view.index + 1 < view.ayahs.length) {
       setView({ ...view, index: view.index + 1, doneInPeriod: view.doneInPeriod + 1 })
       return
@@ -176,6 +220,24 @@ export function KidHome() {
       )
       if (next.kind === 'surah-complete') {
         await markAssignmentMastered(assignment.id)
+        try {
+          const result = await processSurahComplete(kid.id, assignment.surah_number)
+          setKid((k) => (k ? { ...k, stars_balance: k.stars_balance + result.starsAwarded } : k))
+          if (result.newBadgeKeys.length > 0) {
+            setBadges((prev) => [
+              ...prev,
+              ...result.newBadgeKeys.map((badge_key) => ({
+                id: badge_key,
+                kid_id: kid.id,
+                badge_key,
+                earned_at: new Date().toISOString(),
+              })),
+            ])
+            setCelebratingBadges((prev) => [...prev, ...result.newBadgeKeys])
+          }
+        } catch (err) {
+          console.error('Gamification update failed:', err)
+        }
         setView({ kind: 'surah-complete', surahName: surah.englishName })
       } else {
         setView({
@@ -262,6 +324,10 @@ export function KidHome() {
           {Icon ? <Icon className="h-10 w-10" /> : kid.name[0]?.toUpperCase()}
         </div>
         <h1 className={`text-xl font-bold ${theme.heading}`}>{kid.name}</h1>
+        <div className="flex items-center gap-2">
+          <StreakFlame streak={streak} theme={theme} />
+          <StarsChip stars={kid.stars_balance} theme={theme} />
+        </div>
       </div>
 
       {view.kind === 'loading' && <LoadingScreen />}
@@ -353,8 +419,19 @@ export function KidHome() {
         />
       )}
 
+      {celebratingBadges.length > 0 && (
+        <BadgeUnlockCelebration
+          badgeKey={celebratingBadges[0]}
+          onDismiss={() => setCelebratingBadges((prev) => prev.slice(1))}
+        />
+      )}
+
       {customizing && (
         <div className="flex w-full max-w-xs flex-col gap-4">
+          <div className={`flex flex-col gap-3 rounded-2xl p-5 shadow-sm ${theme.cardBg}`}>
+            <h2 className={`text-center text-sm font-semibold ${theme.bodyText}`}>Badges</h2>
+            <BadgeShelf badges={badges} theme={theme} />
+          </div>
           <div className={`flex flex-col items-center gap-3 rounded-2xl p-5 shadow-sm ${theme.cardBg}`}>
             <h2 className={`text-sm font-semibold ${theme.bodyText}`}>Pick your avatar</h2>
             <AvatarPicker

@@ -1,3 +1,4 @@
+import { Star, Flame } from 'lucide-react'
 import type { Kid } from '../types/database'
 import { AVATAR_ICONS } from '../lib/avatarIcons'
 import { getTheme } from '../lib/themes'
@@ -7,9 +8,10 @@ interface KidCardProps {
   kid: Kid
   onClick?: () => void
   reciterName?: string
+  streakDays?: number
 }
 
-export function KidCard({ kid, onClick, reciterName }: KidCardProps) {
+export function KidCard({ kid, onClick, reciterName, streakDays }: KidCardProps) {
   const initials = kid.name
     .split(' ')
     .map((part) => part[0])
@@ -36,6 +38,18 @@ export function KidCard({ kid, onClick, reciterName }: KidCardProps) {
       </div>
       <span className="text-xl font-semibold text-slate-800">{kid.name}</span>
       {reciterName && <span className="text-xs text-slate-400">{reciterName}</span>}
+      <span className="flex items-center gap-2 text-xs text-slate-400">
+        <span className="flex items-center gap-0.5">
+          <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+          {kid.stars_balance}
+        </span>
+        {streakDays !== undefined && streakDays > 0 && (
+          <span className="flex items-center gap-0.5">
+            <Flame className="h-3 w-3 text-orange-500" />
+            {streakDays}
+          </span>
+        )}
+      </span>
     </button>
   )
 }
