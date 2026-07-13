@@ -37,13 +37,15 @@ export function AssignmentStatus({
           {!assignment && <p className="text-xs text-slate-400">No surah assigned yet</p>}
           {assignment?.status === 'learning' && surahMeta && (
             <p className="text-xs text-slate-500">
-              {surahMeta.englishName} — {memorizedCount}/{surahMeta.numberOfAyahs} memorized
+              {surahMeta.englishName} <span className="text-slate-400">({surahMeta.englishNameTranslation})</span> —{' '}
+              {memorizedCount}/{surahMeta.numberOfAyahs} memorized
             </p>
           )}
           {isMastered && surahMeta && (
             <p className="text-xs text-emerald-600">
-              🎉 {surahMeta.englishName} complete!
-              {suggestedSurahMeta && ` Suggested next: ${suggestedSurahMeta.englishName}`}
+              🎉 {surahMeta.englishName} ({surahMeta.englishNameTranslation}) complete!
+              {suggestedSurahMeta &&
+                ` Suggested next: ${suggestedSurahMeta.englishName} (${suggestedSurahMeta.englishNameTranslation})`}
             </p>
           )}
         </div>

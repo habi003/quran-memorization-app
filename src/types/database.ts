@@ -83,6 +83,7 @@ export interface SurahContent {
   number: number
   name: string
   englishName: string
+  englishNameTranslation: string
   numberOfAyahs: number
   ayahs: Ayah[]
 }

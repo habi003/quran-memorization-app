@@ -40,16 +40,26 @@ import { playTap, playSuccess } from '../lib/sounds'
 type PracticeView =
   | { kind: 'loading' }
   | { kind: 'no-assignment' }
-  | { kind: 'surah-complete'; surahName: string }
+  | { kind: 'surah-complete'; surahNumber: number; surahName: string; surahNameTranslation: string }
   | {
       kind: 'done-for-period'
       period: TargetPeriod
       surahNumber: number
       surahName: string
+      surahNameTranslation: string
       doneInPeriod: number
       target: number
     }
-  | { kind: 'session'; surahName: string; ayahs: Ayah[]; index: number; period: TargetPeriod; doneInPeriod: number; target: number }
+  | {
+      kind: 'session'
+      surahName: string
+      surahNameTranslation: string
+      ayahs: Ayah[]
+      index: number
+      period: TargetPeriod
+      doneInPeriod: number
+      target: number
+    }
   | { kind: 'error'; message: string }
 
 export function KidHome() {
@@ -147,13 +157,19 @@ export function KidHome() {
       )
 
       if (today.kind === 'surah-complete') {
-        setView({ kind: 'surah-complete', surahName: surah.englishName })
+        setView({
+          kind: 'surah-complete',
+          surahNumber: active.surah_number,
+          surahName: surah.englishName,
+          surahNameTranslation: surah.englishNameTranslation,
+        })
       } else if (today.kind === 'done-for-period') {
         setView({
           kind: 'done-for-period',
           period: today.period,
           surahNumber: active.surah_number,
           surahName: surah.englishName,
+          surahNameTranslation: surah.englishNameTranslation,
           doneInPeriod: today.doneInPeriod,
           target: today.target,
         })
@@ -161,6 +177,7 @@ export function KidHome() {
         setView({
           kind: 'session',
           surahName: surah.englishName,
+          surahNameTranslation: surah.englishNameTranslation,
           ayahs: today.ayahs,
           index: 0,
           period: today.period,
@@ -292,13 +309,19 @@ export function KidHome() {
         } catch (err) {
           console.error('Gamification update failed:', err)
         }
-        setView({ kind: 'surah-complete', surahName: surah.englishName })
+        setView({
+          kind: 'surah-complete',
+          surahNumber: assignment.surah_number,
+          surahName: surah.englishName,
+          surahNameTranslation: surah.englishNameTranslation,
+        })
       } else {
         setView({
           kind: 'done-for-period',
           period: assignment.target_period,
           surahNumber: assignment.surah_number,
           surahName: surah.englishName,
+          surahNameTranslation: surah.englishNameTranslation,
           doneInPeriod: view.doneInPeriod + 1,
           target: view.target,
         })
@@ -462,7 +485,18 @@ export function KidHome() {
         <div className="flex flex-col items-center gap-2">
           <p className="text-3xl">🎉</p>
           <p className={`text-lg font-semibold ${theme.heading}`}>Surah {view.surahName} complete!</p>
+          <p className={`text-sm ${theme.bodyText}`}>({view.surahNameTranslation})</p>
           <p className={theme.bodyText}>Ask a parent for a new surah.</p>
+          <button
+            type="button"
+            onClick={() => {
+              playTap()
+              setReviewingSurah({ number: view.surahNumber, name: view.surahName })
+            }}
+            className="mt-2 flex items-center gap-1.5 rounded-full bg-gradient-to-br from-emerald-500 to-emerald-600 px-5 py-2.5 font-semibold text-white transition hover:from-emerald-600 hover:to-emerald-700 active:scale-95"
+          >
+            <RotateCcw className="h-4 w-4" /> Revise {view.surahName} while you wait
+          </button>
         </div>
       )}
 
@@ -471,6 +505,9 @@ export function KidHome() {
           <ProgressDots total={view.target} filled={view.doneInPeriod} />
           <p className={`text-lg font-semibold ${theme.heading}`}>
             {view.period === 'weekly' ? "This week's ayahs are done! 🌟" : 'Done for today! 🌟'}
+          </p>
+          <p className={`-mt-2 text-xs ${theme.bodyText}`}>
+            {view.surahName} ({view.surahNameTranslation})
           </p>
           <p className={theme.bodyText}>
             {view.period === 'weekly' ? 'New ayahs next week — or revise what you know now:' : 'New ayahs tomorrow — or revise what you know now:'}
@@ -492,7 +529,7 @@ export function KidHome() {
         <div className="flex flex-col items-center gap-6">
           <div className="flex flex-col items-center gap-1">
             <p className={`text-sm font-medium ${theme.bodyText}`}>
-              {view.surahName} {view.period === 'weekly' && '· this week'}
+              {view.surahName} ({view.surahNameTranslation}) {view.period === 'weekly' && '· this week'}
             </p>
             <ProgressDots total={view.target} filled={view.doneInPeriod} />
           </div>
