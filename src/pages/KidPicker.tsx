@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Settings } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { fetchReciters } from '../lib/quran'
 import type { Kid } from '../types/database'
 import { KidCard } from '../components/KidCard'
 import { LoadingScreen } from '../components/LoadingScreen'
@@ -12,12 +13,23 @@ export function KidPicker() {
   const { lock } = useParentGate()
   const [kids, setKids] = useState<Kid[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [reciterNames, setReciterNames] = useState<Record<string, string>>({})
 
   useEffect(() => {
     // Entering Kid Mode always re-locks Parent Mode for the rest of this
     // session, regardless of device type.
     lock()
   }, [lock])
+
+  useEffect(() => {
+    fetchReciters()
+      .then((list) => {
+        setReciterNames(Object.fromEntries(list.map((r) => [r.identifier, r.englishName])))
+      })
+      .catch(() => {
+        // Reciter names are a display nicety — fine to just show nothing.
+      })
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -51,7 +63,12 @@ export function KidPicker() {
       ) : (
         <div className="flex flex-wrap justify-center gap-6">
           {kids.map((kid) => (
-            <KidCard key={kid.id} kid={kid} onClick={() => navigate(`/kids/${kid.id}/home`)} />
+            <KidCard
+              key={kid.id}
+              kid={kid}
+              onClick={() => navigate(`/kids/${kid.id}/home`)}
+              reciterName={reciterNames[kid.preferred_reciter]}
+            />
           ))}
         </div>
       )}
