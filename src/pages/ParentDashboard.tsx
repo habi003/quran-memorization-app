@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Settings } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { hasPin } from '../lib/pin'
 import { fetchSurahList, fetchReciters } from '../lib/quran'
-import { assignSurah, markSurahAlreadyCompleted, type TargetPeriod } from '../lib/memorization'
+import { assignSurah, markSurahAlreadyCompleted, todayLocalDate, type TargetPeriod } from '../lib/memorization'
 import { checkAndAwardSurahCompleteBadge, streakFromDates } from '../lib/gamification'
 import { getCurrentTitle } from '../lib/badgeCatalog'
 import { useAuth } from '../context/AuthContext'
@@ -42,6 +42,9 @@ export function ParentDashboard() {
   const [reciterNames, setReciterNames] = useState<Record<string, string>>({})
   const [streaksByKid, setStreaksByKid] = useState<Record<string, number>>({})
   const [titlesByKid, setTitlesByKid] = useState<Record<string, string>>({})
+  const [practicedTodayByKid, setPracticedTodayByKid] = useState<Record<string, boolean>>({})
+  const [isLive, setIsLive] = useState(false)
+  const refetchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const loadKids = useCallback(async () => {
     const { data, error: fetchError } = await supabase.from('kids').select('*').order('created_at')
@@ -69,6 +72,7 @@ export function ParentDashboard() {
       setMemorizedCounts({})
       setStreaksByKid({})
       setTitlesByKid({})
+      setPracticedTodayByKid({})
       setAssignmentsLoading(false)
       return
     }
@@ -114,6 +118,10 @@ export function ParentDashboard() {
     const streaks: Record<string, number> = {}
     for (const id of kidIds) streaks[id] = streakFromDates(datesByKid[id] ?? [])
 
+    const today = todayLocalDate()
+    const practicedToday: Record<string, boolean> = {}
+    for (const id of kidIds) practicedToday[id] = (datesByKid[id] ?? []).includes(today)
+
     const claimedKeysByKid: Record<string, string[]> = {}
     for (const row of (badgesRes.data ?? []) as { kid_id: string; badge_key: string; claimed_at: string | null }[]) {
       if (!row.claimed_at) continue
@@ -130,11 +138,42 @@ export function ParentDashboard() {
     setSurahMetaByNumber(surahMap)
     setStreaksByKid(streaks)
     setTitlesByKid(titles)
+    setPracticedTodayByKid(practicedToday)
     setAssignmentsLoading(false)
   }, [])
 
   useEffect(() => {
     if (kids) loadAssignments(kids)
+  }, [kids, loadAssignments])
+
+  // Live updates when the tablet reports progress. practice_log is written
+  // on every completed ayah (not just full-target completion), and mastery/
+  // badge-claim events always co-occur with a practice_log write in the same
+  // session, so this one subscription is enough to keep the whole dashboard
+  // fresh — no need to also subscribe to assignments/badges/stars_log.
+  //
+  // No `filter` is passed, relying entirely on practice_log's "owner access
+  // via kid" RLS policy to scope delivery to only this parent's own kids —
+  // postgres_changes Realtime enforces RLS using the subscriber's JWT, the
+  // same trust boundary every other query in this app already depends on.
+  useEffect(() => {
+    if (!kids || kids.length === 0) return
+
+    const channel = supabase
+      .channel('practice_log-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'practice_log' }, () => {
+        // Debounced — a session can write several practice_log rows in quick
+        // succession (one per ayah), and each refetch is 5 batched queries.
+        if (refetchDebounceRef.current) clearTimeout(refetchDebounceRef.current)
+        refetchDebounceRef.current = setTimeout(() => loadAssignments(kids), 600)
+      })
+      .subscribe((status) => setIsLive(status === 'SUBSCRIBED'))
+
+    return () => {
+      if (refetchDebounceRef.current) clearTimeout(refetchDebounceRef.current)
+      setIsLive(false)
+      supabase.removeChannel(channel)
+    }
   }, [kids, loadAssignments])
 
   async function handleAssign(surahNumber: number, target: number, period: TargetPeriod) {
@@ -174,7 +213,15 @@ export function ParentDashboard() {
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">Welcome, {getDisplayName(user)}</h1>
-          <p className="text-sm text-slate-500">Here's how the family is doing.</p>
+          <p className="flex items-center gap-1.5 text-sm text-slate-500">
+            Here's how the family is doing.
+            {isLive && (
+              <span className="flex items-center gap-1 text-xs font-medium text-emerald-600">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
+                Live
+              </span>
+            )}
+          </p>
         </div>
         <div className="flex items-center gap-3">
           <ModeToggle mode="parent" onSwitch={switchToKidMode} />
@@ -248,6 +295,7 @@ export function ParentDashboard() {
                   surahMeta={surahMeta}
                   suggestedSurahMeta={suggestedSurahMeta}
                   memorizedCount={memorizedCount}
+                  practicedToday={practicedTodayByKid[kid.id] ?? false}
                   onAssign={() => setAssigningKid(kid)}
                   onMarkCompleted={() => setMarkingCompletedKid(kid)}
                 />
