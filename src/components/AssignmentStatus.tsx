@@ -9,6 +9,7 @@ interface AssignmentStatusProps {
   surahMeta: ApiSurahMeta | null
   suggestedSurahMeta?: ApiSurahMeta | null
   memorizedCount: number
+  practicedToday: boolean
   onAssign: () => void
   onMarkCompleted: () => void
 }
@@ -19,6 +20,7 @@ export function AssignmentStatus({
   surahMeta,
   suggestedSurahMeta,
   memorizedCount,
+  practicedToday,
   onAssign,
   onMarkCompleted,
 }: AssignmentStatusProps) {
@@ -33,7 +35,16 @@ export function AssignmentStatus({
           {Icon ? <Icon className="h-5 w-5" /> : kid.name[0]?.toUpperCase()}
         </div>
         <div>
-          <p className="font-medium text-slate-800">{kid.name}</p>
+          <p className="flex items-center gap-1.5 font-medium text-slate-800">
+            {kid.name}
+            <span
+              className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                practicedToday ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-400'
+              }`}
+            >
+              {practicedToday ? 'Practiced today' : 'Not yet today'}
+            </span>
+          </p>
           {!assignment && <p className="text-xs text-slate-400">No surah assigned yet</p>}
           {assignment?.status === 'learning' && surahMeta && (
             <p className="text-xs text-slate-500">
