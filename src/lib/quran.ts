@@ -2,7 +2,9 @@ import type { ApiReciter, ApiSurahMeta, Ayah, SurahContent } from '../types/data
 
 // Cached client-side only (localStorage) — text/metadata, never audio bytes.
 // Not the PWA offline cache (that's a service worker, milestone 8).
-const CACHE_PREFIX = 'qma:quran:v1:'
+// v2: SurahContent gained englishNameTranslation — bumped so kids/devices
+// with a v1 cache don't keep serving stale objects missing that field.
+const CACHE_PREFIX = 'qma:quran:v2:'
 
 function getCached<T>(key: string): T | null {
   try {
@@ -59,6 +61,7 @@ interface ApiAyah {
 interface ApiSurahEdition {
   name: string
   englishName: string
+  englishNameTranslation: string
   numberOfAyahs: number
   ayahs: ApiAyah[]
 }
@@ -88,6 +91,7 @@ export async function fetchSurah(surahNumber: number, reciterEdition: string): P
     number: surahNumber,
     name: uthmani.name,
     englishName: uthmani.englishName,
+    englishNameTranslation: uthmani.englishNameTranslation,
     numberOfAyahs: uthmani.numberOfAyahs,
     ayahs,
   }

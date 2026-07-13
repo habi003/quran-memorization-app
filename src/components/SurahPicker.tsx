@@ -11,15 +11,27 @@ interface SurahPickerProps {
   initialSurahNumber?: number
   /** Show a "suggested next surah" banner instead of landing silently. */
   isSuggestion?: boolean
+  /** Prefill the pace controls from the kid's current assignment, if any,
+   * instead of always resetting to the daily/2 default — makes tweaking an
+   * existing assignment's target a one-tap change rather than a redo. */
+  initialTarget?: number
+  initialPeriod?: TargetPeriod
 }
 
-export function SurahPicker({ onAssign, onClose, initialSurahNumber, isSuggestion }: SurahPickerProps) {
+export function SurahPicker({
+  onAssign,
+  onClose,
+  initialSurahNumber,
+  isSuggestion,
+  initialTarget,
+  initialPeriod,
+}: SurahPickerProps) {
   const [surahs, setSurahs] = useState<ApiSurahMeta[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<ApiSurahMeta | null>(null)
-  const [target, setTarget] = useState(2)
-  const [period, setPeriod] = useState<TargetPeriod>('daily')
+  const [target, setTarget] = useState(initialTarget ?? 2)
+  const [period, setPeriod] = useState<TargetPeriod>(initialPeriod ?? 'daily')
   const [submitting, setSubmitting] = useState(false)
   const currentRowRef = useRef<HTMLButtonElement | null>(null)
 

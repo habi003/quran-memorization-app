@@ -267,6 +267,8 @@ export function ParentDashboard() {
             <SurahPicker
               initialSurahNumber={initialSurahNumber}
               isSuggestion={isMastered && nextSurahNumber !== null}
+              initialTarget={assignment?.daily_ayah_target}
+              initialPeriod={assignment?.target_period}
               onAssign={handleAssign}
               onClose={() => setAssigningKid(null)}
             />
