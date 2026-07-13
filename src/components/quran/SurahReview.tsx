@@ -104,6 +104,28 @@ export function SurahReview({
     }
   }
 
+  // Lets a kid tap a dot to start revising from that ayah instead of always
+  // beginning at the first one — dot i is always ayah i+1 here, since
+  // `ayahs` only ever holds a contiguous run from the surah's start (kids
+  // memorize in order, no gaps).
+  function handleJumpTo(index: number) {
+    if (!ayahs) return
+    playTap()
+    audioRef.current?.pause()
+    setPlaying(false)
+
+    if (index === displayIndex) {
+      if (audioRef.current) {
+        audioRef.current.currentTime = 0
+        audioRef.current.play()
+        setPlaying(true)
+      }
+      return
+    }
+
+    advanceTo(index, { pause: false, autoPlay: true })
+  }
+
   function handleEnded() {
     if (!ayahs) return
     const ayah = ayahs[displayIndex]
@@ -143,7 +165,7 @@ export function SurahReview({
           <>
             <audio ref={audioRef} src={ayahs[displayIndex].audioUrl} onEnded={handleEnded} />
 
-            <ProgressDots total={ayahs.length} filled={displayIndex} />
+            <ProgressDots total={ayahs.length} filled={displayIndex} onSelect={handleJumpTo} />
 
             <div
               key={displayIndex}
