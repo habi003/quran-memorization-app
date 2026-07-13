@@ -41,6 +41,12 @@ create table kids (
   preferred_reciter text not null default 'ar.alafasy',  -- alquran.cloud audio edition id
   created_at timestamptz default now()
 );
+
+-- Added during milestone 3/4 (not in the original schema): per-kid
+-- self-serve customization, picked by the kid in the Customize panel.
+alter table kids add column theme text not null default 'default-light';
+alter table kids add column text_size text not null default 'medium';
+alter table kids add column animations_enabled boolean not null default true;
 ```
 
 ### 4.2 Memorization track (Quran)
@@ -50,8 +56,9 @@ create table assignments (
   id uuid primary key default gen_random_uuid(),
   kid_id uuid not null references kids(id),
   surah_number int not null,          -- 1-114
-  daily_ayah_target int default 2,
-  status text default 'learning',     -- learning | mastered
+  daily_ayah_target int default 2,    -- despite the name, this is "ayahs per period" — see target_period
+  target_period text not null default 'daily',  -- 'daily' | 'weekly', added milestone 3 (teacher-assigned weekly targets)
+  status text default 'learning',     -- learning | mastered | superseded (reassignment keeps history instead of overwriting)
   assigned_at timestamptz default now()
 );
 
@@ -170,22 +177,32 @@ create table badges (
   kid_id uuid not null references kids(id),
   badge_key text not null,     -- see catalogue below
   earned_at timestamptz default now(),
+  claimed_at timestamptz,      -- added milestone 4: null until the kid taps to unlock it (see below)
   unique (kid_id, badge_key)
 );
 ```
 
-**Badge catalogue** — keep this as a small frontend constant (name, icon, description, unlock condition), *not* a DB table. It's app copy, not data that changes per family, so it doesn't need to sync:
+`kids.stars_balance` is kept in sync with `stars_log` by a Postgres trigger (`sync_stars_balance`, `AFTER INSERT ON stars_log`) — added milestone 4 so the balance can never drift regardless of which code path writes to the log.
+
+**Claim-to-unlock** (added milestone 4, not in the original design): a badge row is written the moment its condition is met, with `claimed_at` left `null` — it shows as a glowing "tap to unlock" tile in the kid's Badge Shelf rather than being silently granted. Claiming is a conditional `UPDATE ... WHERE claimed_at IS NULL` (race-safe against double-taps/two devices). This intentionally does **not** recompute "pending" live from current stats — a kid who crosses a streak tier but doesn't tap before the streak later resets would otherwise lose that badge forever, since streak (unlike a count/total) can go down. Parent/admin-driven backfills (marking a surah as already-completed from before the app existed) grant instantly with no claim step, since that's a trusted action outside Kid Mode, not a moment to gamify.
+
+**Badge catalogue** — kept as a small frontend constant (name, icon, description, unlock condition), *not* a DB table. It's app copy, not data that changes per family, so it doesn't need to sync:
 
 | badge_key | unlocks when |
 |---|---|
 | `first_ayah` | completes the very first memorization item ever |
-| `first_lesson` | completes the very first reading item ever |
-| `streak_3` / `streak_7` / `streak_30` | practice_log has entries on that many consecutive days |
-| `perfect_day` | both tracks completed on the same day |
-| `unit_1_complete` | all Unit 1 lessons show `mastered` in `reading_progress` |
-| `surah_complete` (parameterized per surah) | an assigned surah's every ayah is `memorized` |
+| `first_lesson` | completes the very first reading item ever *(reserved — unreachable until the reading track exists)* |
+| `streak_3` / `streak_7` / `streak_14` / `streak_30` / `streak_60` / `streak_100` / `streak_180` / `streak_365` | practice_log has entries on that many consecutive days |
+| `perfect_day` | both tracks completed on the same day *(reserved — unreachable until the reading track exists)* |
+| `unit_1_complete` | all Unit 1 lessons show `mastered` in `reading_progress` *(reserved — unreachable until the reading track exists)* |
+| `milestone_surahs_3` / `_5` / `_10` / `_25` / `_50` / `_75` / `_100` / `_114` | kid has mastered that many surahs total (distinct from `surah_complete`, which is per-specific-surah) — each also grants a **title** ("Surah Starter" → "Hafiz al-Quran") and some grant a cosmetic avatar/theme unlock |
+| `surah_complete_<n>` (parameterized per surah) | an assigned surah's every ayah is `memorized` — instant-grant (not claim-gated), not shown in the Badge Shelf (a kid mastering 40-50+ individual surahs would make the shelf unusably long; the `milestone_surahs_*` counts are the meaningful shelf signal) |
 
-**Streak** is computed, not stored: count consecutive calendar days (working backward from today) with at least one `practice_log` row — no separate streak column to keep in sync.
+**Titles**: tied to the `milestone_surahs_*` badges only (not streak) — one clean progression rather than two overlapping tracks. "Current title" is the highest-tier one claimed, computed by one shared function used identically on the kid's own screen and the parent's dashboard. Titles come with an in-app certificate (name, title, date, and *why* it was awarded) that stays browsable afterward, not just shown once.
+
+**Cosmetic unlocks**: some `streak_*`/`milestone_surahs_*` badges also unlock a reward-only avatar or theme (a small frontend map, badge_key → `{type, key}`). Existing avatars/themes from before this feature are never retroactively locked — only new reward-only entries are gated — since locking something a kid already has selected would be a real regression. A parent editing one kid's profile only ever offers that kid's own unlocked set, not the full catalogue or another kid's unlocks.
+
+**Streak** is computed, not stored: count consecutive calendar days (working backward from today) with at least one `practice_log` row — no separate streak column to keep in sync. Any implementation of this query needs its "how far back to look" limit sized past the *largest configured streak tier*, not the largest that exists today — a limit sized for a 30-day max silently caps every streak at that value once higher tiers are added, with no error, just kids never crediting past it.
 
 **Design principle for the reward system**: keep rewards predictable and tied directly to effort (fixed stars per completed item, fixed badges per named milestone) rather than randomized "loot box" style rewards. Variable-ratio reward schedules are what make some apps compulsively engaging for adults — that mechanic is best avoided for a 7-year-old's habit-building tool. A missed day should just quietly reset the streak counter with no guilt-tripping copy ("Let's start a new streak!" not "You broke your streak!").
 
@@ -257,8 +274,8 @@ The reading track uses a lighter version of the same 3 steps (hear it → repeat
 **Gamification, woven into the flow above rather than bolted on:**
 - Stars animate in immediately on "I got it!" / item complete (small, frequent, satisfying — not saved up for later).
 - A streak flame with the current count sits at the top of the home screen always.
-- A **badge shelf** (Parent or Kid mode, either works) shows earned badges in color and locked ones as grey silhouettes with a hint — gives him something to look forward to.
-- Optional but a nice signature touch: a simple visual "path" of his assigned surahs as stepping stones (walking figure or similar), each stone lighting up as that surah is completed — turns the surah list into something that feels like progress on a map rather than a checklist.
+- A **badge shelf** (in a tabbed Customize panel, Kid Mode) shows earned badges in color, badges the kid has qualified for but not yet tapped as a glowing "tap to unlock" tile, and locked ones as a grey progress ring showing how close they are to the next tier — gives him something to look forward to and a concrete sense of progress, not just a flat locked icon. Milestone titles come with a browsable in-app certificate explaining what they were awarded for.
+- Optional, not yet built: a simple visual "path" of his assigned surahs as stepping stones (walking figure or similar), each stone lighting up as that surah is completed — turns the surah list into something that feels like progress on a map rather than a checklist.
 
 ## 8. Parent Mode — Dashboard
 
@@ -266,11 +283,11 @@ Per kid: today's status (done/not done, both tracks), streak, weekly history (sm
 
 ## 9. Build Order (suggest to Claude Code as milestones)
 
-1. Supabase project: run the schema above, enable RLS with the policies shown.
-2. App scaffold (Vite + React), auth wiring, kid-profile picker + parent-mode PIN gate.
-3. Memorization core: assignment → fetch from alquran.cloud → cache → display → audio → the listen/repeat/recite-alone 3-step flow → writes to `practice_log` and `memorization_progress`.
-4. Gamification layer: `stars_log` writes on item completion, streak calculation, badge-unlock checks, badge shelf UI.
-5. Parent dashboard with Realtime subscription on `practice_log`.
+1. ✅ Supabase project: run the schema above, enable RLS with the policies shown.
+2. ✅ App scaffold (Vite + React), auth wiring, kid-profile picker + parent-mode PIN gate.
+3. ✅ Memorization core: assignment → fetch from alquran.cloud → cache → display → audio → the listen/repeat/recite-alone 3-step flow → writes to `practice_log` and `memorization_progress`. Grew several rounds of follow-up polish beyond the initial build (daily/weekly targets, per-kid theme/text-size/animation settings, surah English-meaning display, revise-while-waiting for the next assignment, prefilled assignment-change dialog).
+4. ✅ Gamification layer: `stars_log` writes on item completion, streak calculation, badge-unlock checks, badge shelf UI. Grew well beyond the original sketch — see §4.4/§7: more streak tiers, surah-count milestones with titles, claim-to-unlock UX, in-app certificates, cosmetic avatar/theme unlocks.
+5. Parent dashboard with Realtime subscription on `practice_log`. **Next up.**
 6. Reading track: lesson/item entry screen (parent) + item-type renderer with the lighter hear/repeat/read-yourself flow (kid) + `kid_reading_position` advance logic.
 7. Sabaq/sabqi/manzil review query, weighted toward manzil.
 8. PWA manifest + service worker for offline caching + deploy.
@@ -288,9 +305,13 @@ Per kid: today's status (done/not done, both tracks), streak, weekly history (sm
   - iOS requires a user gesture before audio playback — never rely on autoplay; the "Listen" step's play button satisfies this naturally.
   - iOS Arabic TTS voices are decent quality; test `SpeechSynthesis` voice selection early (pick an `ar-SA` voice explicitly rather than the default).
   - iOS may evict PWA storage under pressure — treat all caches as re-fetchable, keep source-of-truth in Supabase.
+- **Backend: Supabase**, decided and built on. Firebase was never pursued.
+- **Assignment pacing**: both daily and weekly targets supported (`assignments.target_period`) — a teacher assigning "5 ayahs by next week" doesn't force daily-drip pacing; a weekly target's full quota is available in one sitting if the kid wants.
+- **Per-kid customization**: theme (6 built-in + reward-unlockable), text size, animation on/off — all self-serve from Kid Mode's Customize panel, not parent-configured.
+- **Gamification claim UX**: badges are tapped to unlock rather than silently granted (see §4.4) — a deliberate addition beyond the original design, made because it gives the "reward moment" more weight without reintroducing randomized/loot-box mechanics (the reward and its trigger condition are still fully fixed and predictable, only the *moment of discovery* is interactive).
+- **Settings UI pattern**: tabbed panels over long scrolling stacks once there are more than ~2 categories of controls, with tabs that have nothing to show hidden entirely rather than rendered empty — established for both Kid Mode's Customize panel and the parent's Edit Kid form.
 
-**Still open — worth deciding early, not blocking a first build:**
-- Supabase vs Firebase (spec assumes Supabase/Postgres).
+**Still open — worth deciding early, not blocking further build:**
 - Whether kid mode needs its own PIN to prevent leaving the app, or whether you'll rely on the tablet's OS-level guided-access/kiosk mode instead — the app itself doesn't need to solve this, just document which approach you're using.
 - Whether to seed his existing **23 memorized surahs** into `memorization_progress` as `status = 'memorized'` right away, so the review rotation (sabqi/manzil) has real material to pull from from day one, instead of starting empty. Recommended: yes, seed them — otherwise the review feature has nothing to show until weeks of new assignments accumulate.
 - Daily reminder notifications (push notification vs. just relying on the home-screen PWA icon) — a nice-to-have, not needed for v1.
