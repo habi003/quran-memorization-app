@@ -4,7 +4,13 @@ import { Settings } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { hasPin } from '../lib/pin'
 import { fetchSurahList, fetchReciters } from '../lib/quran'
-import { assignSurah, markSurahAlreadyCompleted, todayLocalDate, type TargetPeriod } from '../lib/memorization'
+import {
+  assignSurah,
+  flagSurahForRevision,
+  markSurahAlreadyCompleted,
+  todayLocalDate,
+  type TargetPeriod,
+} from '../lib/memorization'
 import { checkAndAwardSurahCompleteBadge, streakFromDates } from '../lib/gamification'
 import { getCurrentTitle } from '../lib/badgeCatalog'
 import { useAuth } from '../context/AuthContext'
@@ -16,6 +22,7 @@ import { ModeToggle } from '../components/ModeToggle'
 import { AssignmentStatus } from '../components/AssignmentStatus'
 import { SurahPicker } from '../components/SurahPicker'
 import { MarkCompletedSurahs } from '../components/MarkCompletedSurahs'
+import { RevisionPicker } from '../components/RevisionPicker'
 import { WelcomeNamePrompt } from '../components/WelcomeNamePrompt'
 import { playTap } from '../lib/sounds'
 
@@ -39,6 +46,7 @@ export function ParentDashboard() {
   const [assignmentsLoading, setAssignmentsLoading] = useState(true)
   const [assigningKid, setAssigningKid] = useState<Kid | null>(null)
   const [markingCompletedKid, setMarkingCompletedKid] = useState<Kid | null>(null)
+  const [revisingKid, setRevisingKid] = useState<Kid | null>(null)
   const [reciterNames, setReciterNames] = useState<Record<string, string>>({})
   const [streaksByKid, setStreaksByKid] = useState<Record<string, number>>({})
   const [titlesByKid, setTitlesByKid] = useState<Record<string, string>>({})
@@ -193,6 +201,13 @@ export function ParentDashboard() {
     if (kids) await loadAssignments(kids)
   }
 
+  async function handlePickRevision(surahNumbers: number[]) {
+    if (!revisingKid) return
+    for (const surahNumber of surahNumbers) {
+      await flagSurahForRevision(revisingKid.id, surahNumber)
+    }
+  }
+
   function switchToKidMode() {
     // KidPicker locks the parent gate itself once it has actually mounted at
     // /kids — locking here instead would race with this navigation (the
@@ -301,6 +316,7 @@ export function ParentDashboard() {
                   practicedToday={practicedTodayByKid[kid.id] ?? false}
                   onAssign={() => setAssigningKid(kid)}
                   onMarkCompleted={() => setMarkingCompletedKid(kid)}
+                  onPickRevision={() => setRevisingKid(kid)}
                 />
               )
             })}
@@ -332,6 +348,10 @@ export function ParentDashboard() {
           onConfirm={handleMarkCompleted}
           onClose={() => setMarkingCompletedKid(null)}
         />
+      )}
+
+      {revisingKid && (
+        <RevisionPicker kidId={revisingKid.id} onConfirm={handlePickRevision} onClose={() => setRevisingKid(null)} />
       )}
 
       {user && !hasCustomName(user) && <WelcomeNamePrompt suggestedName={getDisplayName(user)} />}

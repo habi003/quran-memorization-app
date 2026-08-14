@@ -229,6 +229,25 @@ export async function getMemorizedAyahNumbers(kidId: string, surahNumber: number
   return (data ?? []).map((r) => r.ayah_number as number)
 }
 
+// Lets a parent explicitly flag an already-mastered surah for revision —
+// either because it needs re-revising for any reason, or because the parent
+// wants to choose (rather than wait for) what shows up in "Time to revise!"
+// this week. Resets last_reviewed_at to null for all its memorized ayahs,
+// which makes it the most-overdue surah and puts it at the front of
+// getSurahsForReview's least-recently-reviewed rotation — no separate
+// "pinned surah" state to track, and it naturally falls back to the normal
+// rotation once it's actually been revised again. Doesn't touch `status`,
+// so it has no effect on mastery/badges — purely a revision-ordering signal.
+export async function flagSurahForRevision(kidId: string, surahNumber: number): Promise<void> {
+  const { error } = await supabase
+    .from('memorization_progress')
+    .update({ last_reviewed_at: null })
+    .eq('kid_id', kidId)
+    .eq('surah_number', surahNumber)
+    .eq('status', 'memorized')
+  if (error) throw error
+}
+
 // Picks mastered surahs to revise today — least-recently-reviewed first.
 // Not true independent randomness: it varies day to day as reviews happen,
 // but also mathematically guarantees every mastered surah eventually
