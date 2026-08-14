@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Play, Pause, SkipForward, X } from 'lucide-react'
+import { Play, Pause, SkipBack, SkipForward, X } from 'lucide-react'
 import { fetchSurah } from '../../lib/quran'
 import { getMemorizedAyahNumbers, markAyahMemorized } from '../../lib/memorization'
 import type { Ayah } from '../../types/database'
@@ -104,6 +104,14 @@ export function SurahReview({
     }
   }
 
+  // Symmetric to handleSkip, for stepping backward through a long surah
+  // without having to find the right dot in the (now-scrollable) strip.
+  function handlePrevious() {
+    if (!ayahs || displayIndex === 0) return
+    playTap()
+    advanceTo(displayIndex - 1, { pause: false, autoPlay: playing })
+  }
+
   // Lets a kid tap a dot to start revising from that ayah instead of always
   // beginning at the first one — dot i is always ayah i+1 here, since
   // `ayahs` only ever holds a contiguous run from the surah's start (kids
@@ -138,72 +146,92 @@ export function SurahReview({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4" onClick={onClose}>
-      <div
-        className="animate-pop flex w-full max-w-sm flex-col items-center gap-6 rounded-2xl bg-white p-6 text-center shadow-lg"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="relative flex w-full items-center justify-center">
-          <p className="text-sm font-semibold text-slate-700">Revising {surahName}</p>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="absolute right-0 flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        {error && <p className="text-sm text-red-600">{error}</p>}
-
-        {!error && ayahs === null && <p className="text-sm text-slate-400">Loading…</p>}
-
-        {ayahs?.length === 0 && <p className="text-sm text-slate-500">Nothing to revise here yet.</p>}
-
-        {ayahs && ayahs.length > 0 && (
-          <>
-            <audio ref={audioRef} src={ayahs[displayIndex].audioUrl} onEnded={handleEnded} />
-
-            <ProgressDots total={ayahs.length} filled={displayIndex} onSelect={handleJumpTo} />
-
-            <div
-              key={displayIndex}
-              className={`flex w-full flex-col items-center justify-center gap-3 ${textSize.minHeight} ${
-                animationsEnabled
-                  ? `transition-all duration-500 ease-in-out ${
-                      phase === 'out' ? 'scale-90 opacity-0' : 'animate-ayah-in scale-100 opacity-100'
-                    }`
-                  : ''
-              }`}
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/50 px-4 py-8" onClick={onClose}>
+      <div className="flex min-h-full items-center justify-center">
+        <div
+          className="animate-pop flex w-full max-w-sm flex-col items-center gap-6 rounded-2xl bg-white p-6 text-center shadow-lg"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="relative flex w-full items-center justify-center">
+            <p className="text-sm font-semibold text-slate-700">Revising {surahName}</p>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              className="absolute right-0 flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100"
             >
-              <p dir="rtl" className={`text-center leading-relaxed text-slate-800 ${textSize.arabic}`}>
-                {ayahs[displayIndex].arabic}
-              </p>
-              <p className={`text-center italic text-slate-500 ${textSize.translit}`}>
-                {ayahs[displayIndex].transliteration}
-              </p>
-            </div>
+              <X className="h-4 w-4" />
+            </button>
+          </div>
 
-            <div className="flex items-center gap-4">
-              <button
-                type="button"
-                onClick={handlePlayPause}
-                className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-emerald-600 text-white shadow-lg transition active:scale-90"
+          {error && <p className="text-sm text-red-600">{error}</p>}
+
+          {!error && ayahs === null && <p className="text-sm text-slate-400">Loading…</p>}
+
+          {ayahs?.length === 0 && <p className="text-sm text-slate-500">Nothing to revise here yet.</p>}
+
+          {ayahs && ayahs.length > 0 && (
+            <>
+              <audio ref={audioRef} src={ayahs[displayIndex].audioUrl} onEnded={handleEnded} />
+
+              <div className="flex w-full flex-col items-center gap-1.5">
+                <ProgressDots total={ayahs.length} filled={displayIndex} onSelect={handleJumpTo} />
+                {/* Only worth the extra line once the dot strip is long enough that
+                    the current position isn't obvious at a glance. */}
+                {ayahs.length > 12 && (
+                  <p className="text-xs font-medium text-slate-400">
+                    Ayah {displayIndex + 1} of {ayahs.length}
+                  </p>
+                )}
+              </div>
+
+              <div
+                key={displayIndex}
+                className={`flex w-full flex-col items-center justify-center gap-3 ${textSize.minHeight} ${
+                  animationsEnabled
+                    ? `transition-all duration-500 ease-in-out ${
+                        phase === 'out' ? 'scale-90 opacity-0' : 'animate-ayah-in scale-100 opacity-100'
+                      }`
+                    : ''
+                }`}
               >
-                {playing ? <Pause className="h-7 w-7" /> : <Play className="ml-1 h-7 w-7" />}
-              </button>
-              <button
-                type="button"
-                onClick={handleSkip}
-                aria-label="Skip"
-                className="flex h-11 w-11 items-center justify-center rounded-full bg-slate-100 text-slate-600 transition active:scale-90"
-              >
-                <SkipForward className="h-5 w-5" />
-              </button>
-            </div>
-          </>
-        )}
+                <p dir="rtl" className={`text-center leading-relaxed text-slate-800 ${textSize.arabic}`}>
+                  {ayahs[displayIndex].arabic}
+                </p>
+                <p className={`text-center italic text-slate-500 ${textSize.translit}`}>
+                  {ayahs[displayIndex].transliteration}
+                </p>
+              </div>
+
+              <div className="flex items-center gap-4">
+                <button
+                  type="button"
+                  onClick={handlePrevious}
+                  disabled={displayIndex === 0}
+                  aria-label="Previous ayah"
+                  className="flex h-11 w-11 items-center justify-center rounded-full bg-slate-100 text-slate-600 transition active:scale-90 disabled:opacity-40"
+                >
+                  <SkipBack className="h-5 w-5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={handlePlayPause}
+                  className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-emerald-600 text-white shadow-lg transition active:scale-90"
+                >
+                  {playing ? <Pause className="h-7 w-7" /> : <Play className="ml-1 h-7 w-7" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSkip}
+                  aria-label="Skip"
+                  className="flex h-11 w-11 items-center justify-center rounded-full bg-slate-100 text-slate-600 transition active:scale-90"
+                >
+                  <SkipForward className="h-5 w-5" />
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </div>
   )
