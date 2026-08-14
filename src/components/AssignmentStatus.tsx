@@ -1,4 +1,4 @@
-import { BookPlus, RefreshCw, Check, ListChecks, Repeat } from 'lucide-react'
+import { BookPlus, RefreshCw, Check, ListChecks, Repeat, Headphones } from 'lucide-react'
 import type { ApiSurahMeta, Assignment, Kid } from '../types/database'
 import { AVATAR_ICONS } from '../lib/avatarIcons'
 import { getTheme } from '../lib/themes'
@@ -10,6 +10,7 @@ interface AssignmentStatusProps {
   suggestedSurahMeta?: ApiSurahMeta | null
   memorizedCount: number
   practicedToday: boolean
+  reciterName?: string
   onAssign: () => void
   onMarkCompleted: () => void
   onPickRevision: () => void
@@ -22,10 +23,13 @@ export function AssignmentStatus({
   suggestedSurahMeta,
   memorizedCount,
   practicedToday,
+  reciterName,
   onAssign,
   onMarkCompleted,
   onPickRevision,
 }: AssignmentStatusProps) {
+  const hasRange = assignment?.start_ayah != null && assignment?.end_ayah != null
+  const rangeAyahCount = hasRange ? assignment!.end_ayah! - assignment!.start_ayah! + 1 : null
   const Icon = kid.avatar ? AVATAR_ICONS[kid.avatar] : undefined
   const theme = getTheme(kid.theme)
   const isMastered = assignment?.status === 'mastered'
@@ -47,11 +51,22 @@ export function AssignmentStatus({
               {practicedToday ? 'Practiced today' : 'Not yet today'}
             </span>
           </p>
+          {reciterName && (
+            <p className="flex items-center gap-1 text-[11px] text-slate-400">
+              <Headphones className="h-3 w-3" /> {reciterName}
+            </p>
+          )}
           {!assignment && <p className="text-xs text-slate-400">No surah assigned yet</p>}
           {assignment?.status === 'learning' && surahMeta && (
             <p className="text-xs text-slate-500">
-              {surahMeta.englishName} <span className="text-slate-400">({surahMeta.englishNameTranslation})</span> —{' '}
-              {memorizedCount}/{surahMeta.numberOfAyahs} memorized
+              {surahMeta.englishName} <span className="text-slate-400">({surahMeta.englishNameTranslation})</span>
+              {hasRange && (
+                <span className="text-slate-400">
+                  {' '}
+                  · ayahs {assignment!.start_ayah}–{assignment!.end_ayah}
+                </span>
+              )}{' '}
+              — {memorizedCount}/{rangeAyahCount ?? surahMeta.numberOfAyahs} memorized
             </p>
           )}
           {isMastered && surahMeta && (
