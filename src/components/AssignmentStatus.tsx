@@ -1,4 +1,4 @@
-import { BookPlus, RefreshCw, Check, ListChecks } from 'lucide-react'
+import { BookPlus, RefreshCw, Check, ListChecks, Repeat } from 'lucide-react'
 import type { ApiSurahMeta, Assignment, Kid } from '../types/database'
 import { AVATAR_ICONS } from '../lib/avatarIcons'
 import { getTheme } from '../lib/themes'
@@ -12,6 +12,7 @@ interface AssignmentStatusProps {
   practicedToday: boolean
   onAssign: () => void
   onMarkCompleted: () => void
+  onPickRevision: () => void
 }
 
 export function AssignmentStatus({
@@ -23,6 +24,7 @@ export function AssignmentStatus({
   practicedToday,
   onAssign,
   onMarkCompleted,
+  onPickRevision,
 }: AssignmentStatusProps) {
   const Icon = kid.avatar ? AVATAR_ICONS[kid.avatar] : undefined
   const theme = getTheme(kid.theme)
@@ -63,6 +65,15 @@ export function AssignmentStatus({
       </div>
 
       <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={onPickRevision}
+          aria-label="Pick a surah to revise"
+          title="Pick a surah to revise"
+          className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-200"
+        >
+          <Repeat className="h-4 w-4" />
+        </button>
         <button
           type="button"
           onClick={onMarkCompleted}
