@@ -46,11 +46,26 @@ export async function getActiveAssignment(kidId: string): Promise<Assignment | n
   return data as Assignment | null
 }
 
+export interface AyahRange {
+  startAyah: number
+  endAyah: number
+}
+
+// Assignment.start_ayah/end_ayah are only ever set together (null on both
+// means "whole surah") — this is the one place that invariant gets turned
+// back into an AyahRange for computeTodaysSet.
+export function assignmentRange(assignment: Pick<Assignment, 'start_ayah' | 'end_ayah'>): AyahRange | undefined {
+  return assignment.start_ayah != null && assignment.end_ayah != null
+    ? { startAyah: assignment.start_ayah, endAyah: assignment.end_ayah }
+    : undefined
+}
+
 export async function assignSurah(
   kidId: string,
   surahNumber: number,
   target: number,
   period: TargetPeriod,
+  range?: AyahRange,
 ): Promise<void> {
   // Supersede any existing active assignment first — old progress rows stay
   // untouched as history (milestone 7's manzil bucket needs them).
@@ -61,12 +76,47 @@ export async function assignSurah(
     .eq('status', 'learning')
   if (supersedeError) throw supersedeError
 
+  // Re-picking a surah that's already mastered for this kid is a deliberate
+  // "start over" (forgotten material, marked complete by mistake, etc.) —
+  // supersede the old mastered row(s) too and wipe this surah's memorized
+  // progress, so the kid actually redoes the practice flow instead of
+  // landing straight back on the surah-complete screen (computeTodaysSet
+  // only looks at memorization_progress — a fresh 'learning' row alone,
+  // without this, changes nothing there).
+  const { data: masteredRows, error: masteredError } = await supabase
+    .from('assignments')
+    .select('id')
+    .eq('kid_id', kidId)
+    .eq('surah_number', surahNumber)
+    .eq('status', 'mastered')
+  if (masteredError) throw masteredError
+
+  if (masteredRows && masteredRows.length > 0) {
+    const { error: supersedeMasteredError } = await supabase
+      .from('assignments')
+      .update({ status: 'superseded' })
+      .in(
+        'id',
+        masteredRows.map((r) => r.id as string),
+      )
+    if (supersedeMasteredError) throw supersedeMasteredError
+
+    const { error: wipeProgressError } = await supabase
+      .from('memorization_progress')
+      .delete()
+      .eq('kid_id', kidId)
+      .eq('surah_number', surahNumber)
+    if (wipeProgressError) throw wipeProgressError
+  }
+
   const { error: insertError } = await supabase.from('assignments').insert({
     kid_id: kidId,
     surah_number: surahNumber,
     daily_ayah_target: target,
     target_period: period,
     status: 'learning',
+    start_ayah: range?.startAyah ?? null,
+    end_ayah: range?.endAyah ?? null,
   })
   if (insertError) throw insertError
 }
@@ -88,6 +138,7 @@ export async function computeTodaysSet(
   surahContent: SurahContent,
   target: number,
   period: TargetPeriod,
+  range?: AyahRange,
 ): Promise<TodaysSet> {
   const { data, error } = await supabase
     .from('memorization_progress')
@@ -99,7 +150,14 @@ export async function computeTodaysSet(
   const rows = (data ?? []) as Pick<MemorizationProgress, 'ayah_number' | 'status' | 'last_reviewed_at'>[]
   const memorized = new Set(rows.filter((r) => r.status === 'memorized').map((r) => r.ayah_number))
 
-  if (memorized.size >= surahContent.numberOfAyahs) {
+  // A range scopes the assignment to part of the surah — the working pool
+  // is just that slice, and "complete" means the slice is fully memorized,
+  // not the whole surah.
+  const pool = range
+    ? surahContent.ayahs.filter((a) => a.numberInSurah >= range.startAyah && a.numberInSurah <= range.endAyah)
+    : surahContent.ayahs
+
+  if (pool.every((a) => memorized.has(a.numberInSurah))) {
     return { kind: 'surah-complete' }
   }
 
@@ -115,7 +173,7 @@ export async function computeTodaysSet(
     return { kind: 'done-for-period', period, doneInPeriod, target }
   }
 
-  const ayahs = surahContent.ayahs.filter((a) => !memorized.has(a.numberInSurah)).slice(0, remainingSlots)
+  const ayahs = pool.filter((a) => !memorized.has(a.numberInSurah)).slice(0, remainingSlots)
   return { kind: 'session', ayahs, period, doneInPeriod, target }
 }
 

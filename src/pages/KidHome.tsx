@@ -8,6 +8,7 @@ import { getTheme, THEMES } from '../lib/themes'
 import { fetchSurah, fetchSurahList } from '../lib/quran'
 import {
   getActiveAssignment,
+  assignmentRange,
   computeTodaysSet,
   markAyahMemorized,
   logPracticeSessionComplete,
@@ -154,6 +155,7 @@ export function KidHome() {
         surah,
         active.daily_ayah_target,
         active.target_period,
+        assignmentRange(active),
       )
 
       if (today.kind === 'surah-complete') {
@@ -298,6 +300,7 @@ export function KidHome() {
         surah,
         assignment.daily_ayah_target,
         assignment.target_period,
+        assignmentRange(assignment),
       )
       if (next.kind === 'surah-complete') {
         await markAssignmentMastered(assignment.id)

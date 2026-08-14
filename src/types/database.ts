@@ -26,6 +26,9 @@ export interface Assignment {
   target_period: TargetPeriod
   status: AssignmentStatus
   assigned_at: string
+  // Null on both means "whole surah" — set together, never independently.
+  start_ayah: number | null
+  end_ayah: number | null
 }
 
 export type MemorizationStatus = 'new' | 'learning' | 'memorized'
