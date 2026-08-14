@@ -9,6 +9,7 @@ import {
   flagSurahForRevision,
   markSurahAlreadyCompleted,
   todayLocalDate,
+  type AyahRange,
   type TargetPeriod,
 } from '../lib/memorization'
 import { checkAndAwardSurahCompleteBadge, streakFromDates } from '../lib/gamification'
@@ -184,9 +185,9 @@ export function ParentDashboard() {
     }
   }, [kids, loadAssignments])
 
-  async function handleAssign(surahNumber: number, target: number, period: TargetPeriod) {
+  async function handleAssign(surahNumber: number, target: number, period: TargetPeriod, range?: AyahRange) {
     if (!assigningKid) return
-    await assignSurah(assigningKid.id, surahNumber, target, period)
+    await assignSurah(assigningKid.id, surahNumber, target, period, range)
     if (kids) await loadAssignments(kids)
   }
 
@@ -314,6 +315,7 @@ export function ParentDashboard() {
                   suggestedSurahMeta={suggestedSurahMeta}
                   memorizedCount={memorizedCount}
                   practicedToday={practicedTodayByKid[kid.id] ?? false}
+                  reciterName={reciterNames[kid.preferred_reciter]}
                   onAssign={() => setAssigningKid(kid)}
                   onMarkCompleted={() => setMarkingCompletedKid(kid)}
                   onPickRevision={() => setRevisingKid(kid)}
@@ -332,10 +334,13 @@ export function ParentDashboard() {
           const initialSurahNumber = isMastered ? (nextSurahNumber ?? undefined) : assignment?.surah_number
           return (
             <SurahPicker
+              kidId={assigningKid.id}
               initialSurahNumber={initialSurahNumber}
               isSuggestion={isMastered && nextSurahNumber !== null}
               initialTarget={assignment?.daily_ayah_target}
               initialPeriod={assignment?.target_period}
+              initialStartAyah={!isMastered ? (assignment?.start_ayah ?? undefined) : undefined}
+              initialEndAyah={!isMastered ? (assignment?.end_ayah ?? undefined) : undefined}
               onAssign={handleAssign}
               onClose={() => setAssigningKid(null)}
             />
